@@ -8,7 +8,7 @@ Telegram бот — AI-powered todolist который не просто нап�
 - **Bot Framework:** teloxide
 - **Database:** SQLite (sqlx)
 - **AI:** OpenAI API (gpt-4o-mini)
-- **Hosting:** Fly.io (~$2/month)
+- **Hosting:** VPS (80.87.102.226)
 
 ## Project Structure
 
@@ -26,8 +26,11 @@ src/
 ```bash
 cargo run                 # Run locally (needs TELOXIDE_TOKEN)
 cargo build --release     # Build for production
-flyctl deploy             # Deploy to Fly.io
-flyctl secrets set TELOXIDE_TOKEN=xxx OPENAI_API_KEY=xxx  # Set secrets
+
+# Deploy to VPS
+docker run --rm --platform linux/amd64 -v "$(pwd)":/app -w /app rust:latest cargo build --release
+scp target/release/ai-todolist root@80.87.102.226:/opt/ai-todolist-bot
+ssh root@80.87.102.226 "systemctl restart ai-todolist"
 ```
 
 ## Environment Variables
