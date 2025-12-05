@@ -4,10 +4,12 @@ use chrono::Utc;
 use sqlx::SqlitePool;
 use std::sync::Arc;
 use teloxide::{
+    net::Download,
     prelude::*,
-    types::{InlineKeyboardButton, InlineKeyboardMarkup, ParseMode},
+    types::{InlineKeyboardButton, InlineKeyboardMarkup},
     utils::command::BotCommands,
 };
+use tokio::io::AsyncWriteExt;
 
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase", description = "Available commands:")]
@@ -91,6 +93,70 @@ pub async fn message_handler(
                             .await?;
                     }
                 }
+            }
+        }
+    } else if let Some(voice) = msg.voice() {
+        // Voice message handling
+        if let Some(tg_user) = telegram_user {
+            if let Some(user) = User::find_by_telegram_id(&pool, tg_user.id.0 as i64).await {
+                if let Some(ai) = &ai_service {
+                    // Download voice file
+                    let file = bot.get_file(&voice.file.id).await?;
+                    let mut audio_data = Vec::new();
+                    bot.download_file(&file.path, &mut audio_data).await?;
+
+                    // Transcribe with Whisper
+                    match ai.transcribe_audio(audio_data).await {
+                        Ok(transcript) => {
+                            tracing::info!("Transcribed: {}", transcript);
+
+                            // Parse task from transcript
+                            let current_date = Utc::now().format("%Y-%m-%d %H:%M").to_string();
+                            let (title, due_at) = match ai.parse_task(&transcript, &current_date).await {
+                                Ok(parsed) => (parsed.title, parsed.due_at),
+                                Err(e) => {
+                                    tracing::warn!("AI parse failed: {}, using transcript", e);
+                                    (transcript.clone(), None)
+                                }
+                            };
+
+                            match Task::create(&pool, user.id, &title, None, due_at.as_deref()).await {
+                                Ok(task) => {
+                                    if task.due_at.is_some() {
+                                        let _ = Task::set_reminder_from_due(&pool, task.id).await;
+                                    }
+
+                                    let due_str = task.due_at.as_ref()
+                                        .map(|d| format!("\n📅 {}", d))
+                                        .unwrap_or_default();
+
+                                    bot.send_message(
+                                        msg.chat.id,
+                                        format!("🎤 \"{}\"\n\n✅ Added!\n\n📝 {}{}", transcript, task.title, due_str),
+                                    )
+                                    .reply_markup(task_keyboard(task.id))
+                                    .await?;
+                                }
+                                Err(e) => {
+                                    tracing::error!("Failed to create task: {}", e);
+                                    bot.send_message(msg.chat.id, "❌ Failed to create task")
+                                        .await?;
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!("Transcription failed: {}", e);
+                            bot.send_message(msg.chat.id, "❌ Failed to transcribe voice message")
+                                .await?;
+                        }
+                    }
+                } else {
+                    bot.send_message(msg.chat.id, "❌ Voice messages require AI service")
+                        .await?;
+                }
+            } else {
+                bot.send_message(msg.chat.id, "Please /start first!")
+                    .await?;
             }
         }
     } else if !text.starts_with('/') && !text.is_empty() {

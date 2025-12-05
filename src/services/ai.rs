@@ -1,4 +1,4 @@
-use reqwest::Client;
+use reqwest::{multipart, Client};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone)]
@@ -123,5 +123,44 @@ Examples:
 
         serde_json::from_str(json_str)
             .map_err(|e| format!("Parse JSON failed: {} - content: {}", e, json_str))
+    }
+
+    /// Transcribe audio using Whisper API
+    pub async fn transcribe_audio(&self, audio_data: Vec<u8>) -> Result<String, String> {
+        let part = multipart::Part::bytes(audio_data)
+            .file_name("audio.ogg")
+            .mime_str("audio/ogg")
+            .map_err(|e| format!("Failed to create multipart: {}", e))?;
+
+        let form = multipart::Form::new()
+            .text("model", "whisper-1")
+            .part("file", part);
+
+        let response = self
+            .client
+            .post("https://api.openai.com/v1/audio/transcriptions")
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .multipart(form)
+            .send()
+            .await
+            .map_err(|e| format!("Whisper request failed: {}", e))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let text = response.text().await.unwrap_or_default();
+            return Err(format!("Whisper API error {}: {}", status, text));
+        }
+
+        #[derive(Deserialize)]
+        struct WhisperResponse {
+            text: String,
+        }
+
+        let whisper_response: WhisperResponse = response
+            .json()
+            .await
+            .map_err(|e| format!("Parse Whisper response failed: {}", e))?;
+
+        Ok(whisper_response.text)
     }
 }
