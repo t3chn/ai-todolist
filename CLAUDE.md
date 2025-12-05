@@ -2,36 +2,59 @@
 
 Telegram бот — AI-powered todolist который не просто напоминает, а помогает выполнять задачи.
 
+## Features (MVP Complete)
+
+- **Smart Input**: Natural language task parsing (text + voice)
+- **AI Parsing**: Extracts title, due date, tags (gpt-5-nano)
+- **Voice Messages**: Whisper API transcription → task creation
+- **Message Drafting**: "Draft message to..." generates drafts
+- **Reminders**: 30 min before due time, with snooze (1h/tomorrow)
+- **Morning Brief**: Daily summary at user's preferred time (default 09:00 UTC)
+- **Conversation Context**: Remembers last 5 messages for follow-ups
+- **Inline Buttons**: Done/Delete for quick task management
+- **7-day Trial**: Subscription model ready
+
 ## Tech Stack
 
 - **Language:** Rust
 - **Bot Framework:** teloxide
-- **Database:** SQLite (sqlx)
-- **AI:** OpenAI API (gpt-5-nano)
-- **Hosting:** DigitalOcean (164.92.143.168)
+- **Database:** SQLite (sqlx, bundled)
+- **AI:** OpenAI API (gpt-5-nano for parsing, Whisper for voice)
+- **Hosting:** DigitalOcean VPS (164.92.143.168)
 
 ## Project Structure
 
 ```
 src/
-├── main.rs              # Entry point
-├── handlers/            # Telegram handlers
-├── services/            # Business logic
-├── models/              # Data models
-└── db/                  # Database layer
+├── main.rs              # Entry point, dispatcher setup
+├── handlers/            # Telegram message & callback handlers
+├── services/
+│   ├── ai.rs           # OpenAI integration (parse, transcribe)
+│   ├── reminder.rs     # Background reminder service (60s loop)
+│   ├── morning_brief.rs # Daily brief service
+│   └── context.rs      # Conversation context storage
+├── models/
+│   ├── user.rs         # User model with subscriptions
+│   └── task.rs         # Task model with reminders
+└── db/                 # Database initialization & migrations
 ```
 
 ## Commands
 
 ```bash
-cargo run                 # Run locally (needs TELOXIDE_TOKEN)
-cargo build --release     # Build for production
+# Local development
+cargo run                 # Needs TELOXIDE_TOKEN, OPENAI_API_KEY
 
-# Deploy to DigitalOcean
+# Cross-compile for Linux (from macOS)
 docker run --rm --platform linux/amd64 -v "$(pwd)":/app -w /app rust:latest cargo build --release
+
+# Deploy to VPS
 ssh root@164.92.143.168 "systemctl stop ai-todolist"
 scp target/release/ai-todolist root@164.92.143.168:/opt/ai-todolist-bot
 ssh root@164.92.143.168 "systemctl start ai-todolist"
+
+# Check logs
+ssh root@164.92.143.168 "journalctl -u ai-todolist -f"
 ```
 
 ## Environment Variables
@@ -42,31 +65,25 @@ OPENAI_API_KEY=          # OpenAI API key
 DATABASE_URL=sqlite:data/bot.db
 ```
 
-## beads
+## Bot Commands
 
-```bash
-bd ready                  # Available tasks
-bd create "Task" -t task  # Create task
-bd close <id>            # Complete task
-bd sync                  # Sync with git
-```
+- `/start` - Welcome + trial info
+- `/help` - Available commands
+- `/tasks` - List pending tasks with buttons
 
-## MVP Scope
+## Usage Examples
 
-**Features:**
-- Smart input (text + voice → tasks)
-- Task management (CRUD)
-- Reminders
-- Morning brief
-- Message drafting
-- Telegram payments
+Text:
+- "Call mom tomorrow at 5pm" → Task with reminder
+- "Buy groceries" → Simple task
+- "Draft message to boss about delay" → Message draft
 
-**Out of scope:**
+Voice:
+- 🎤 Any voice message → Transcribed → Parsed → Task/Draft
+
+## Out of Scope (v1.1)
+
 - Calendar integration
-- Team features
+- Team/shared tasks
 - Native apps
-
-## Sprint
-
-See `~/planner/mvps/ai-todolist/sprint.md` for full sprint plan.
-Current: Day 1 of 14 (Solid scope)
+- Telegram payments (needs provider token)
