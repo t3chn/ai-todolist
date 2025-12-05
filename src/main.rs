@@ -1,6 +1,6 @@
-use sqlx::SqlitePool;
 use std::sync::Arc;
 use teloxide::prelude::*;
+use teloxide::utils::command::BotCommands;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod db;
@@ -39,6 +39,11 @@ async fn main() {
     let pool = Arc::new(pool);
     let bot = Bot::from_env();
     let context = Arc::new(ConversationContext::new());
+
+    // Register bot commands for menu
+    if let Err(e) = bot.set_my_commands(handlers::Command::bot_commands()).await {
+        tracing::warn!("Failed to set bot commands: {}", e);
+    }
 
     let handler = dptree::entry()
         .branch(Update::filter_message().endpoint(handlers::message_handler))

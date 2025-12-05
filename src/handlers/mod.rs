@@ -20,6 +20,10 @@ pub enum Command {
     Help,
     #[command(description = "List your tasks")]
     Tasks,
+    #[command(description = "Today's tasks")]
+    Today,
+    #[command(description = "Settings")]
+    Settings,
 }
 
 fn task_keyboard(task_id: i64) -> InlineKeyboardMarkup {
@@ -111,6 +115,69 @@ Or try:\n\
                                 .await?;
                             }
                         }
+                    } else {
+                        bot.send_message(msg.chat.id, "Please /start first")
+                            .await?;
+                    }
+                }
+            }
+            Command::Today => {
+                if let Some(tg_user) = telegram_user {
+                    if let Some(user) = User::find_by_telegram_id(&pool, tg_user.id.0 as i64).await {
+                        let tasks = Task::find_today_tasks(&pool, user.id).await.unwrap_or_default();
+
+                        if tasks.is_empty() {
+                            bot.send_message(msg.chat.id, "📅 No tasks for today!\n\nSend me a task with a due date.")
+                                .await?;
+                        } else {
+                            bot.send_message(msg.chat.id, format!("📅 Today's tasks ({}):", tasks.len()))
+                                .await?;
+
+                            for task in &tasks {
+                                let time = task.due_at.as_ref()
+                                    .and_then(|d| d.split(' ').nth(1))
+                                    .map(|t| format!(" at {}", t))
+                                    .unwrap_or_default();
+
+                                bot.send_message(
+                                    msg.chat.id,
+                                    format!("📝 {}{}", task.title, time),
+                                )
+                                .reply_markup(task_keyboard(task.id))
+                                .await?;
+                            }
+                        }
+                    } else {
+                        bot.send_message(msg.chat.id, "Please /start first")
+                            .await?;
+                    }
+                }
+            }
+            Command::Settings => {
+                if let Some(tg_user) = telegram_user {
+                    if let Some(user) = User::find_by_telegram_id(&pool, tg_user.id.0 as i64).await {
+                        let settings_keyboard = InlineKeyboardMarkup::new(vec![
+                            vec![
+                                InlineKeyboardButton::callback("🌍 Change timezone", "settings:timezone"),
+                            ],
+                            vec![
+                                InlineKeyboardButton::callback("⏰ Change brief time", "settings:brief_time"),
+                            ],
+                        ]);
+
+                        bot.send_message(
+                            msg.chat.id,
+                            format!(
+                                "⚙️ Settings\n\n\
+                                🌍 Timezone: {}\n\
+                                ⏰ Morning brief: {}\n\n\
+                                Tap a button to change:",
+                                user.timezone,
+                                user.morning_brief_time
+                            ),
+                        )
+                        .reply_markup(settings_keyboard)
+                        .await?;
                     } else {
                         bot.send_message(msg.chat.id, "Please /start first")
                             .await?;
@@ -501,6 +568,129 @@ pub async fn callback_handler(
                         .await?;
                     }
                 }
+            }
+        }
+
+        bot.answer_callback_query(q.id).await?;
+    } else if data == "settings:timezone" {
+        // Show timezone options
+        let tz_keyboard = InlineKeyboardMarkup::new(vec![
+            vec![
+                InlineKeyboardButton::callback("🇺🇸 US Eastern (UTC-5)", "tz:America/New_York"),
+                InlineKeyboardButton::callback("🇺🇸 US Pacific (UTC-8)", "tz:America/Los_Angeles"),
+            ],
+            vec![
+                InlineKeyboardButton::callback("🇬🇧 London (UTC+0)", "tz:Europe/London"),
+                InlineKeyboardButton::callback("🇪🇺 Berlin (UTC+1)", "tz:Europe/Berlin"),
+            ],
+            vec![
+                InlineKeyboardButton::callback("🇷🇺 Moscow (UTC+3)", "tz:Europe/Moscow"),
+                InlineKeyboardButton::callback("↩️ Back", "settings:back"),
+            ],
+        ]);
+
+        if let Some(msg) = &q.message {
+            bot.edit_message_text(
+                msg.chat().id,
+                msg.id(),
+                "🌍 Select your timezone:",
+            )
+            .reply_markup(tz_keyboard)
+            .await?;
+        }
+
+        bot.answer_callback_query(q.id).await?;
+    } else if let Some(tz) = data.strip_prefix("tz:") {
+        // Set timezone
+        let telegram_id = q.from.id.0 as i64;
+        if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
+            let _ = User::update_timezone(&pool, user.id, tz).await;
+
+            if let Some(msg) = &q.message {
+                bot.edit_message_text(
+                    msg.chat().id,
+                    msg.id(),
+                    format!("✅ Timezone set to: {}", tz),
+                )
+                .await?;
+            }
+
+            bot.answer_callback_query(q.id).text("✅ Timezone updated").await?;
+        }
+    } else if data == "settings:brief_time" {
+        // Show brief time options
+        let time_keyboard = InlineKeyboardMarkup::new(vec![
+            vec![
+                InlineKeyboardButton::callback("06:00", "brief:06:00"),
+                InlineKeyboardButton::callback("07:00", "brief:07:00"),
+                InlineKeyboardButton::callback("08:00", "brief:08:00"),
+            ],
+            vec![
+                InlineKeyboardButton::callback("09:00", "brief:09:00"),
+                InlineKeyboardButton::callback("10:00", "brief:10:00"),
+                InlineKeyboardButton::callback("11:00", "brief:11:00"),
+            ],
+            vec![
+                InlineKeyboardButton::callback("↩️ Back", "settings:back"),
+            ],
+        ]);
+
+        if let Some(msg) = &q.message {
+            bot.edit_message_text(
+                msg.chat().id,
+                msg.id(),
+                "⏰ Select morning brief time (UTC):",
+            )
+            .reply_markup(time_keyboard)
+            .await?;
+        }
+
+        bot.answer_callback_query(q.id).await?;
+    } else if let Some(time) = data.strip_prefix("brief:") {
+        // Set brief time
+        let telegram_id = q.from.id.0 as i64;
+        if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
+            let _ = User::update_morning_brief_time(&pool, user.id, time).await;
+
+            if let Some(msg) = &q.message {
+                bot.edit_message_text(
+                    msg.chat().id,
+                    msg.id(),
+                    format!("✅ Morning brief time set to: {} UTC", time),
+                )
+                .await?;
+            }
+
+            bot.answer_callback_query(q.id).text("✅ Brief time updated").await?;
+        }
+    } else if data == "settings:back" {
+        // Back to settings
+        let telegram_id = q.from.id.0 as i64;
+        if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
+            let settings_keyboard = InlineKeyboardMarkup::new(vec![
+                vec![
+                    InlineKeyboardButton::callback("🌍 Change timezone", "settings:timezone"),
+                ],
+                vec![
+                    InlineKeyboardButton::callback("⏰ Change brief time", "settings:brief_time"),
+                ],
+            ]);
+
+            if let Some(msg) = &q.message {
+                bot.edit_message_text(
+                    msg.chat().id,
+                    msg.id(),
+                    format!(
+                        "⚙️ Settings\n\n\
+                        🌍 Timezone: {}\n\
+                        ⏰ Morning brief: {}\n\n\
+                        Tap a button to change:",
+                        user.timezone,
+                        user.morning_brief_time
+                    ),
+                )
+                .reply_markup(settings_keyboard)
+                .await?;
             }
         }
 

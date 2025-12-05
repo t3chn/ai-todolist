@@ -145,4 +145,28 @@ impl User {
         .await?;
         Ok(())
     }
+
+    /// Update timezone
+    pub async fn update_timezone(pool: &SqlitePool, id: i64, timezone: &str) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "UPDATE users SET timezone = ?, updated_at = datetime('now') WHERE id = ?"
+        )
+        .bind(timezone)
+        .bind(id)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Update morning brief time
+    pub async fn update_morning_brief_time(pool: &SqlitePool, id: i64, time: &str) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "UPDATE users SET morning_brief_time = ?, updated_at = datetime('now') WHERE id = ?"
+        )
+        .bind(time)
+        .bind(id)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
 }
