@@ -43,25 +43,43 @@ pub async fn message_handler(
         match cmd {
             Command::Start => {
                 if let Some(tg_user) = telegram_user {
-                    let _ = User::get_or_create(
+                    let user = User::get_or_create(
                         &pool,
                         tg_user.id.0 as i64,
                         tg_user.username.as_deref(),
                         Some(&tg_user.first_name),
                     )
                     .await;
-                }
 
-                bot.send_message(
-                    msg.chat.id,
-                    "👋 Welcome to AI Todolist!\n\n\
-                    Just send me tasks in natural language:\n\n\
-                    • \"Call mom tomorrow at 5pm\"\n\
-                    • \"Buy groceries\"\n\
-                    • \"Finish report by Friday\"\n\n\
-                    /tasks - View your tasks",
-                )
-                .await?;
+                    let trial_info = if let Ok(u) = user {
+                        if let Some(days) = u.trial_days_remaining() {
+                            format!("\n\n🎁 Trial: {} days remaining", days)
+                        } else {
+                            String::new()
+                        }
+                    } else {
+                        String::new()
+                    };
+
+                    bot.send_message(
+                        msg.chat.id,
+                        format!("👋 Welcome to AI Todolist!\n\n\
+                        Just send me tasks in natural language:\n\n\
+                        • \"Call mom tomorrow at 5pm\"\n\
+                        • \"Buy groceries\"\n\
+                        • \"Finish report by Friday\"\n\n\
+                        🎤 Voice messages supported!\n\
+                        ✉️ \"Draft message to...\" for drafts\n\n\
+                        /tasks - View your tasks{}", trial_info),
+                    )
+                    .await?;
+                } else {
+                    bot.send_message(
+                        msg.chat.id,
+                        "👋 Welcome to AI Todolist!\n\n/tasks - View your tasks",
+                    )
+                    .await?;
+                }
             }
             Command::Help => {
                 bot.send_message(msg.chat.id, Command::descriptions().to_string())

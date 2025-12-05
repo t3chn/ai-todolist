@@ -19,6 +19,14 @@ pub async fn init_pool(database_url: &str) -> Result<SqlitePool, sqlx::Error> {
         .execute(&pool)
         .await?;
 
+    // Run subscription migration (ignore errors if columns exist)
+    for stmt in include_str!("../../migrations/002_subscriptions.sql").split(';') {
+        let stmt = stmt.trim();
+        if !stmt.is_empty() {
+            let _ = sqlx::query(stmt).execute(&pool).await;
+        }
+    }
+
     tracing::info!("Database initialized");
     Ok(pool)
 }
