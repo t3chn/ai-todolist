@@ -6,6 +6,9 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 mod db;
 mod handlers;
 mod models;
+mod services;
+
+use services::AiService;
 
 #[tokio::main]
 async fn main() {
@@ -28,6 +31,11 @@ async fn main() {
         .await
         .expect("Failed to initialize database");
 
+    // Initialize AI service (optional - works without it)
+    let ai_service = std::env::var("OPENAI_API_KEY")
+        .ok()
+        .map(|key| Arc::new(AiService::new(key)));
+
     let pool = Arc::new(pool);
     let bot = Bot::from_env();
 
@@ -35,7 +43,7 @@ async fn main() {
         .branch(Update::filter_message().endpoint(handlers::message_handler));
 
     Dispatcher::builder(bot, handler)
-        .dependencies(dptree::deps![pool])
+        .dependencies(dptree::deps![pool, ai_service])
         .enable_ctrlc_handler()
         .build()
         .dispatch()

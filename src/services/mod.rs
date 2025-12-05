@@ -1,1 +1,3 @@
-// Services module - business logic
+mod ai;
+
+pub use ai::{AiService, ParsedTask};
