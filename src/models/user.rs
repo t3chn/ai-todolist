@@ -56,4 +56,27 @@ impl User {
             Self::create(pool, telegram_id, username, first_name).await
         }
     }
+
+    /// Find users who need morning brief now (current hour:minute matches their brief time)
+    pub async fn find_users_for_morning_brief(pool: &SqlitePool) -> Result<Vec<Self>, sqlx::Error> {
+        // Get current time in format HH:MM
+        sqlx::query_as::<_, User>(
+            r#"
+            SELECT * FROM users
+            WHERE morning_brief_time = strftime('%H:%M', 'now')
+            "#,
+        )
+        .fetch_all(pool)
+        .await
+    }
+
+    /// Find by internal id
+    pub async fn find_by_id(pool: &SqlitePool, id: i64) -> Option<Self> {
+        sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
+            .bind(id)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten()
+    }
 }

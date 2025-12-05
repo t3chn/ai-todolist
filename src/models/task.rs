@@ -192,4 +192,31 @@ impl Task {
         .await?;
         Ok(())
     }
+
+    /// Find tasks due today for a user
+    pub async fn find_today_tasks(pool: &SqlitePool, user_id: i64) -> Result<Vec<Self>, sqlx::Error> {
+        sqlx::query_as::<_, Task>(
+            r#"
+            SELECT * FROM tasks
+            WHERE user_id = ?
+              AND status IN ('pending', 'in_progress')
+              AND date(due_at) = date('now')
+            ORDER BY due_at ASC
+            "#
+        )
+        .bind(user_id)
+        .fetch_all(pool)
+        .await
+    }
+
+    /// Count pending tasks for a user
+    pub async fn count_pending(pool: &SqlitePool, user_id: i64) -> i64 {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM tasks WHERE user_id = ? AND status IN ('pending', 'in_progress')"
+        )
+        .bind(user_id)
+        .fetch_one(pool)
+        .await
+        .unwrap_or(0)
+    }
 }
