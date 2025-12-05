@@ -24,9 +24,10 @@ src/
 ## Commands
 
 ```bash
-cargo run                 # Run locally
+cargo run                 # Run locally (needs TELOXIDE_TOKEN)
 cargo build --release     # Build for production
-fly deploy                # Deploy to Fly.io
+flyctl deploy             # Deploy to Fly.io
+flyctl secrets set TELOXIDE_TOKEN=xxx OPENAI_API_KEY=xxx  # Set secrets
 ```
 
 ## Environment Variables
