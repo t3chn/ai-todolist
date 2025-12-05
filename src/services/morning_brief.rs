@@ -4,7 +4,7 @@ use sqlx::SqlitePool;
 use std::sync::Arc;
 use std::time::Duration;
 use teloxide::prelude::*;
-use teloxide::types::ChatId;
+use teloxide::types::{ChatId, InlineKeyboardButton, InlineKeyboardMarkup};
 
 pub async fn start_morning_brief_loop(bot: Bot, pool: Arc<SqlitePool>) {
     tracing::info!("Starting morning brief service...");
@@ -25,7 +25,14 @@ async fn check_and_send_briefs(bot: &Bot, pool: &SqlitePool) -> Result<(), Box<d
     for user in users {
         let brief = generate_brief(pool, &user).await?;
 
-        if let Err(e) = bot.send_message(ChatId(user.telegram_id), brief).await {
+        let keyboard = InlineKeyboardMarkup::new(vec![vec![
+            InlineKeyboardButton::callback("📋 View tasks", "view_tasks"),
+        ]]);
+
+        if let Err(e) = bot.send_message(ChatId(user.telegram_id), brief)
+            .reply_markup(keyboard)
+            .await
+        {
             tracing::error!("Failed to send morning brief to user {}: {}", user.id, e);
         } else {
             tracing::info!("Sent morning brief to user {}", user.telegram_id);

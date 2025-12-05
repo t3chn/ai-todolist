@@ -1,4 +1,5 @@
-use crate::models::{Task, TaskWithTelegramId};
+use crate::models::Task;
+use chrono::{NaiveDateTime, Utc};
 use sqlx::SqlitePool;
 use std::sync::Arc;
 use std::time::Duration;
@@ -27,15 +28,33 @@ pub async fn start_reminder_loop(bot: Bot, pool: Arc<SqlitePool>) {
     }
 }
 
+fn get_urgency_indicator(due_at: Option<&String>) -> &'static str {
+    if let Some(due_str) = due_at {
+        if let Ok(due_time) = NaiveDateTime::parse_from_str(due_str, "%Y-%m-%d %H:%M:%S") {
+            let now = Utc::now().naive_utc();
+            let minutes_until_due = (due_time - now).num_minutes();
+
+            return match minutes_until_due {
+                ..=15 => "🔴 Due very soon!",
+                16..=30 => "🟡 Due in 30 minutes",
+                _ => "⏰ Reminder",
+            };
+        }
+    }
+    "⏰ Reminder"
+}
+
 async fn check_and_send_reminders(bot: &Bot, pool: &SqlitePool) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let due_tasks = Task::find_due_reminders(pool).await?;
 
     for task in due_tasks {
+        let urgency = get_urgency_indicator(task.due_at.as_ref());
+
         let due_str = task.due_at.as_ref()
             .map(|d| format!("\n📅 Due: {}", d))
             .unwrap_or_default();
 
-        let message = format!("⏰ Reminder!\n\n📝 {}{}", task.title, due_str);
+        let message = format!("{}\n\n📝 {}{}", urgency, task.title, due_str);
 
         match bot.send_message(ChatId(task.telegram_id), message)
             .reply_markup(reminder_keyboard(task.id))

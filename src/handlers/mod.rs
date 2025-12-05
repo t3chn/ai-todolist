@@ -6,7 +6,7 @@ use std::sync::Arc;
 use teloxide::{
     net::Download,
     prelude::*,
-    types::{InlineKeyboardButton, InlineKeyboardMarkup},
+    types::{ChatAction, InlineKeyboardButton, InlineKeyboardMarkup},
     utils::command::BotCommands,
 };
 use tokio::io::AsyncWriteExt;
@@ -51,7 +51,7 @@ pub async fn message_handler(
                     )
                     .await;
 
-                    let trial_info = if let Ok(u) = user {
+                    let trial_info = if let Ok(ref u) = user {
                         if let Some(days) = u.trial_days_remaining() {
                             format!("\n\n🎁 Trial: {} days remaining", days)
                         } else {
@@ -61,17 +61,21 @@ pub async fn message_handler(
                         String::new()
                     };
 
+                    let welcome_keyboard = InlineKeyboardMarkup::new(vec![vec![
+                        InlineKeyboardButton::callback("📋 View tasks", "view_tasks"),
+                    ]]);
+
                     bot.send_message(
                         msg.chat.id,
-                        format!("👋 Welcome to AI Todolist!\n\n\
-                        Just send me tasks in natural language:\n\n\
-                        • \"Call mom tomorrow at 5pm\"\n\
-                        • \"Buy groceries\"\n\
-                        • \"Finish report by Friday\"\n\n\
-                        🎤 Voice messages supported!\n\
-                        ✉️ \"Draft message to...\" for drafts\n\n\
-                        /tasks - View your tasks{}", trial_info),
+                        format!("👋 Welcome to AI Todolist, {}!\n\n\
+I help you manage tasks using natural language.\n\n\
+🚀 Try it now! Send me:\n\
+> Call mom tomorrow at 5pm\n\n\
+Or try:\n\
+• 🎤 Voice message\n\
+• ✉️ \"Draft message to...\"{}", tg_user.first_name, trial_info),
                     )
+                    .reply_markup(welcome_keyboard)
                     .await?;
                 } else {
                     bot.send_message(
@@ -115,10 +119,14 @@ pub async fn message_handler(
             }
         }
     } else if let Some(voice) = msg.voice() {
-        // Voice message handling
+        // Voice message handling with progressive updates
         if let Some(tg_user) = telegram_user {
             if let Some(user) = User::find_by_telegram_id(&pool, tg_user.id.0 as i64).await {
                 if let Some(ai) = &ai_service {
+                    // Send initial processing message
+                    let progress_msg = bot.send_message(msg.chat.id, "🎤 Processing voice...")
+                        .await?;
+
                     // Download voice file
                     let file = bot.get_file(&voice.file.id).await?;
                     let mut audio_data = Vec::new();
@@ -128,6 +136,13 @@ pub async fn message_handler(
                     match ai.transcribe_audio(audio_data).await {
                         Ok(transcript) => {
                             tracing::info!("Transcribed: {}", transcript);
+
+                            // Update progress with transcript
+                            let _ = bot.edit_message_text(
+                                msg.chat.id,
+                                progress_msg.id,
+                                format!("🔄 \"{}\"\n\nParsing...", transcript),
+                            ).await;
 
                             // Parse input from transcript
                             let current_date = Utc::now().format("%Y-%m-%d %H:%M").to_string();
@@ -146,8 +161,9 @@ pub async fn message_handler(
                                                 .map(|d| format!("\n📅 {}", d))
                                                 .unwrap_or_default();
 
-                                            bot.send_message(
+                                            bot.edit_message_text(
                                                 msg.chat.id,
+                                                progress_msg.id,
                                                 format!("🎤 \"{}\"\n\n✅ Added!\n\n📝 {}{}", transcript, task.title, due_str),
                                             )
                                             .reply_markup(task_keyboard(task.id))
@@ -155,24 +171,28 @@ pub async fn message_handler(
                                         }
                                         Err(e) => {
                                             tracing::error!("Failed to create task: {}", e);
-                                            bot.send_message(msg.chat.id, "❌ Failed to create task")
-                                                .await?;
+                                            let _ = bot.edit_message_text(
+                                                msg.chat.id,
+                                                progress_msg.id,
+                                                "❌ Couldn't create task\n\nSomething went wrong.\n\n💡 Try typing your task instead",
+                                            ).await;
                                         }
                                     }
                                 }
                                 Ok(ParsedInput::Draft { recipient, context: _, draft }) => {
-                                    bot.send_message(
+                                    let _ = bot.edit_message_text(
                                         msg.chat.id,
+                                        progress_msg.id,
                                         format!("🎤 \"{}\"\n\n✉️ Draft for {}:\n\n{}\n\n💡 Copy and send!", transcript, recipient, draft),
-                                    )
-                                    .await?;
+                                    ).await;
                                 }
                                 Err(e) => {
                                     tracing::warn!("AI parse failed: {}, using transcript as task", e);
                                     match Task::create(&pool, user.id, &transcript, None, None).await {
                                         Ok(task) => {
-                                            bot.send_message(
+                                            bot.edit_message_text(
                                                 msg.chat.id,
+                                                progress_msg.id,
                                                 format!("🎤 \"{}\"\n\n✅ Added!\n\n📝 {}", transcript, task.title),
                                             )
                                             .reply_markup(task_keyboard(task.id))
@@ -180,8 +200,11 @@ pub async fn message_handler(
                                         }
                                         Err(e) => {
                                             tracing::error!("Failed to create task: {}", e);
-                                            bot.send_message(msg.chat.id, "❌ Failed to create task")
-                                                .await?;
+                                            let _ = bot.edit_message_text(
+                                                msg.chat.id,
+                                                progress_msg.id,
+                                                "❌ Couldn't create task\n\nSomething went wrong.\n\n💡 Try typing your task instead",
+                                            ).await;
                                         }
                                     }
                                 }
@@ -189,8 +212,11 @@ pub async fn message_handler(
                         }
                         Err(e) => {
                             tracing::error!("Transcription failed: {}", e);
-                            bot.send_message(msg.chat.id, "❌ Failed to transcribe voice message")
-                                .await?;
+                            let _ = bot.edit_message_text(
+                                msg.chat.id,
+                                progress_msg.id,
+                                "🎤 Couldn't understand voice\n\nThe audio wasn't clear enough.\n\n💡 Try speaking closer to mic or type your task",
+                            ).await;
                         }
                     }
                 } else {
@@ -207,6 +233,9 @@ pub async fn message_handler(
         if let Some(tg_user) = telegram_user {
             if let Some(user) = User::find_by_telegram_id(&pool, tg_user.id.0 as i64).await {
                 if let Some(ai) = &ai_service {
+                    // Show typing indicator while AI processes
+                    let _ = bot.send_chat_action(msg.chat.id, ChatAction::Typing).await;
+
                     let current_date = Utc::now().format("%Y-%m-%d %H:%M").to_string();
                     let user_context = context.get_context(user.id);
 
@@ -238,7 +267,7 @@ pub async fn message_handler(
                                 }
                                 Err(e) => {
                                     tracing::error!("Failed to create task: {}", e);
-                                    bot.send_message(msg.chat.id, "❌ Failed to create task")
+                                    bot.send_message(msg.chat.id, "❌ Couldn't create task\n\nSomething went wrong on our end.\n\n💡 Try: \"Buy milk tomorrow at 5pm\"")
                                         .await?;
                                 }
                             }
@@ -267,7 +296,7 @@ pub async fn message_handler(
                                 }
                                 Err(e) => {
                                     tracing::error!("Failed to create task: {}", e);
-                                    bot.send_message(msg.chat.id, "❌ Failed to create task")
+                                    bot.send_message(msg.chat.id, "❌ Couldn't create task\n\nSomething went wrong on our end.\n\n💡 Try: \"Buy milk tomorrow at 5pm\"")
                                         .await?;
                                 }
                             }
@@ -286,7 +315,7 @@ pub async fn message_handler(
                         }
                         Err(e) => {
                             tracing::error!("Failed to create task: {}", e);
-                            bot.send_message(msg.chat.id, "❌ Failed to create task")
+                            bot.send_message(msg.chat.id, "❌ Couldn't create task\n\nSomething went wrong on our end.\n\n💡 Try: \"Buy milk tomorrow at 5pm\"")
                                 .await?;
                         }
                     }
@@ -314,7 +343,7 @@ pub async fn callback_handler(
                 let _ = Task::update_status(&pool, task_id, TaskStatus::Done).await;
 
                 // Update message
-                if let Some(msg) = q.message {
+                if let Some(msg) = &q.message {
                     bot.edit_message_text(
                         msg.chat().id,
                         msg.id(),
@@ -324,18 +353,64 @@ pub async fn callback_handler(
                 }
 
                 // Show next task suggestion
-                if let Some(user) = q.from.id.0.try_into().ok()
-                    .and_then(|tid: i64| {
-                        // We need to get user synchronously or use a different approach
-                        None::<User>
-                    }) {
-                    // Would show next task here
+                let telegram_id = q.from.id.0 as i64;
+                if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
+                    let pending = Task::find_pending_by_user(&pool, user.id).await.unwrap_or_default();
+
+                    if let Some(msg) = &q.message {
+                        if let Some(next_task) = pending.first() {
+                            let due_str = next_task.due_at.as_ref()
+                                .map(|d| format!("\n📅 {}", d))
+                                .unwrap_or_default();
+
+                            let next_keyboard = InlineKeyboardMarkup::new(vec![vec![
+                                InlineKeyboardButton::callback("✅ Do it", format!("done:{}", next_task.id)),
+                                InlineKeyboardButton::callback("📋 View all", "view_tasks".to_string()),
+                            ]]);
+
+                            bot.send_message(
+                                msg.chat().id,
+                                format!("🎯 Next up:\n\n📝 {}{}", next_task.title, due_str),
+                            )
+                            .reply_markup(next_keyboard)
+                            .await?;
+                        } else {
+                            bot.send_message(
+                                msg.chat().id,
+                                "🎉 All done! No more pending tasks.",
+                            )
+                            .await?;
+                        }
+                    }
                 }
 
                 bot.answer_callback_query(q.id).text("✅ Done!").await?;
             }
         }
     } else if let Some(task_id_str) = data.strip_prefix("delete:") {
+        // Show confirmation dialog instead of deleting immediately
+        if let Ok(task_id) = task_id_str.parse::<i64>() {
+            if let Some(task) = Task::find_by_id(&pool, task_id).await {
+                if let Some(msg) = q.message {
+                    let confirm_keyboard = InlineKeyboardMarkup::new(vec![vec![
+                        InlineKeyboardButton::callback("🗑 Yes, delete", format!("confirm_delete:{}", task_id)),
+                        InlineKeyboardButton::callback("↩️ Cancel", format!("cancel_delete:{}", task_id)),
+                    ]]);
+
+                    bot.edit_message_text(
+                        msg.chat().id,
+                        msg.id(),
+                        format!("⚠️ Delete \"{}\"?", task.title),
+                    )
+                    .reply_markup(confirm_keyboard)
+                    .await?;
+                }
+
+                bot.answer_callback_query(q.id).await?;
+            }
+        }
+    } else if let Some(task_id_str) = data.strip_prefix("confirm_delete:") {
+        // Actually delete the task
         if let Ok(task_id) = task_id_str.parse::<i64>() {
             if let Some(task) = Task::find_by_id(&pool, task_id).await {
                 let _ = Task::delete(&pool, task_id).await;
@@ -350,6 +425,27 @@ pub async fn callback_handler(
                 }
 
                 bot.answer_callback_query(q.id).text("🗑 Deleted").await?;
+            }
+        }
+    } else if let Some(task_id_str) = data.strip_prefix("cancel_delete:") {
+        // Restore original task view
+        if let Ok(task_id) = task_id_str.parse::<i64>() {
+            if let Some(task) = Task::find_by_id(&pool, task_id).await {
+                if let Some(msg) = q.message {
+                    let due_str = task.due_at.as_ref()
+                        .map(|d| format!("\n📅 {}", d))
+                        .unwrap_or_default();
+
+                    bot.edit_message_text(
+                        msg.chat().id,
+                        msg.id(),
+                        format!("📝 {}{}", task.title, due_str),
+                    )
+                    .reply_markup(task_keyboard(task_id))
+                    .await?;
+                }
+
+                bot.answer_callback_query(q.id).text("Cancelled").await?;
             }
         }
     } else if let Some(snooze_data) = data.strip_prefix("snooze:") {
@@ -381,6 +477,34 @@ pub async fn callback_handler(
                 }
             }
         }
+    } else if data == "view_tasks" {
+        // Show all pending tasks
+        let telegram_id = q.from.id.0 as i64;
+        if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
+            let tasks = Task::find_pending_by_user(&pool, user.id).await.unwrap_or_default();
+
+            if let Some(msg) = &q.message {
+                if tasks.is_empty() {
+                    bot.send_message(msg.chat().id, "📋 No tasks yet!\n\nSend me a message to create one.")
+                        .await?;
+                } else {
+                    for task in &tasks {
+                        let due = task.due_at.as_ref()
+                            .map(|d| format!("\n📅 {}", d))
+                            .unwrap_or_default();
+
+                        bot.send_message(
+                            msg.chat().id,
+                            format!("📝 {}{}", task.title, due),
+                        )
+                        .reply_markup(task_keyboard(task.id))
+                        .await?;
+                    }
+                }
+            }
+        }
+
+        bot.answer_callback_query(q.id).await?;
     }
 
     Ok(())
