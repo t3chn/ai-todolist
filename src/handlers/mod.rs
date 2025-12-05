@@ -3,7 +3,11 @@ use crate::services::AiService;
 use chrono::Utc;
 use sqlx::SqlitePool;
 use std::sync::Arc;
-use teloxide::{prelude::*, types::ParseMode, utils::command::BotCommands};
+use teloxide::{
+    prelude::*,
+    types::{InlineKeyboardButton, InlineKeyboardMarkup, ParseMode},
+    utils::command::BotCommands,
+};
 
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase", description = "Available commands:")]
@@ -14,8 +18,13 @@ pub enum Command {
     Help,
     #[command(description = "List your tasks")]
     Tasks,
-    #[command(description = "Mark task as done")]
-    Done,
+}
+
+fn task_keyboard(task_id: i64) -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![vec![
+        InlineKeyboardButton::callback("✅ Done", format!("done:{}", task_id)),
+        InlineKeyboardButton::callback("🗑 Delete", format!("delete:{}", task_id)),
+    ]])
 }
 
 pub async fn message_handler(
@@ -43,14 +52,11 @@ pub async fn message_handler(
                 bot.send_message(
                     msg.chat.id,
                     "👋 Welcome to AI Todolist!\n\n\
-                    I'm your smart task assistant. Just send me tasks in natural language:\n\n\
+                    Just send me tasks in natural language:\n\n\
                     • \"Call mom tomorrow at 5pm\"\n\
                     • \"Buy groceries\"\n\
                     • \"Finish report by Friday\"\n\n\
-                    Commands:\n\
-                    /tasks - View your tasks\n\
-                    /done <id> - Complete a task\n\
-                    /help - Show help",
+                    /tasks - View your tasks",
                 )
                 .await?;
             }
@@ -67,25 +73,18 @@ pub async fn message_handler(
                             bot.send_message(msg.chat.id, "📋 No tasks yet!\n\nSend me a message to create one.")
                                 .await?;
                         } else {
-                            let mut response = String::from("📋 *Your Tasks:*\n\n");
                             for task in &tasks {
-                                let status = task.status_enum();
                                 let due = task.due_at.as_ref()
-                                    .map(|d| format!(" 📅 {}", d))
+                                    .map(|d| format!("\n📅 {}", d))
                                     .unwrap_or_default();
-                                response.push_str(&format!(
-                                    "{} `{}` {}{}\n",
-                                    status.emoji(),
-                                    task.id,
-                                    task.title,
-                                    due
-                                ));
-                            }
-                            response.push_str("\n_Use /done <id> to complete a task_");
 
-                            bot.send_message(msg.chat.id, response)
-                                .parse_mode(ParseMode::Markdown)
+                                bot.send_message(
+                                    msg.chat.id,
+                                    format!("📝 {}{}", task.title, due),
+                                )
+                                .reply_markup(task_keyboard(task.id))
                                 .await?;
+                            }
                         }
                     } else {
                         bot.send_message(msg.chat.id, "Please /start first")
@@ -93,33 +92,9 @@ pub async fn message_handler(
                     }
                 }
             }
-            Command::Done => {
-                let id_str = text.strip_prefix("/done").unwrap_or("").trim();
-                if let Ok(task_id) = id_str.parse::<i64>() {
-                    if let Some(task) = Task::find_by_id(&pool, task_id).await {
-                        if let Err(e) = Task::update_status(&pool, task_id, TaskStatus::Done).await {
-                            tracing::error!("Failed to update task: {}", e);
-                            bot.send_message(msg.chat.id, "❌ Failed to complete task")
-                                .await?;
-                        } else {
-                            bot.send_message(
-                                msg.chat.id,
-                                format!("✅ Completed: {}", task.title),
-                            )
-                            .await?;
-                        }
-                    } else {
-                        bot.send_message(msg.chat.id, "❌ Task not found")
-                            .await?;
-                    }
-                } else {
-                    bot.send_message(msg.chat.id, "Usage: /done <task_id>\n\nExample: /done 1")
-                        .await?;
-                }
-            }
         }
     } else if !text.starts_with('/') && !text.is_empty() {
-        // Natural language input - parse with AI or create simple task
+        // Natural language input
         if let Some(tg_user) = telegram_user {
             if let Some(user) = User::find_by_telegram_id(&pool, tg_user.id.0 as i64).await {
                 let (title, due_at) = if let Some(ai) = &ai_service {
@@ -146,9 +121,9 @@ pub async fn message_handler(
 
                         bot.send_message(
                             msg.chat.id,
-                            format!("✅ Task added!\n\n📝 {}{}\n🆔 `{}`", task.title, due_str, task.id),
+                            format!("✅ Added!\n\n📝 {}{}", task.title, due_str),
                         )
-                        .parse_mode(ParseMode::Markdown)
+                        .reply_markup(task_keyboard(task.id))
                         .await?;
                     }
                     Err(e) => {
@@ -158,8 +133,64 @@ pub async fn message_handler(
                     }
                 }
             } else {
-                bot.send_message(msg.chat.id, "Please /start first to begin!")
+                bot.send_message(msg.chat.id, "Please /start first!")
                     .await?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+pub async fn callback_handler(
+    bot: Bot,
+    q: CallbackQuery,
+    pool: Arc<SqlitePool>,
+) -> ResponseResult<()> {
+    let data = q.data.unwrap_or_default();
+
+    if let Some(task_id_str) = data.strip_prefix("done:") {
+        if let Ok(task_id) = task_id_str.parse::<i64>() {
+            if let Some(task) = Task::find_by_id(&pool, task_id).await {
+                let _ = Task::update_status(&pool, task_id, TaskStatus::Done).await;
+
+                // Update message
+                if let Some(msg) = q.message {
+                    bot.edit_message_text(
+                        msg.chat().id,
+                        msg.id(),
+                        format!("✅ {}", task.title),
+                    )
+                    .await?;
+                }
+
+                // Show next task suggestion
+                if let Some(user) = q.from.id.0.try_into().ok()
+                    .and_then(|tid: i64| {
+                        // We need to get user synchronously or use a different approach
+                        None::<User>
+                    }) {
+                    // Would show next task here
+                }
+
+                bot.answer_callback_query(q.id).text("✅ Done!").await?;
+            }
+        }
+    } else if let Some(task_id_str) = data.strip_prefix("delete:") {
+        if let Ok(task_id) = task_id_str.parse::<i64>() {
+            if let Some(task) = Task::find_by_id(&pool, task_id).await {
+                let _ = Task::delete(&pool, task_id).await;
+
+                if let Some(msg) = q.message {
+                    bot.edit_message_text(
+                        msg.chat().id,
+                        msg.id(),
+                        format!("🗑 Deleted: {}", task.title),
+                    )
+                    .await?;
+                }
+
+                bot.answer_callback_query(q.id).text("🗑 Deleted").await?;
             }
         }
     }

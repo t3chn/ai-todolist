@@ -40,10 +40,11 @@ async fn main() {
     let bot = Bot::from_env();
 
     let handler = dptree::entry()
-        .branch(Update::filter_message().endpoint(handlers::message_handler));
+        .branch(Update::filter_message().endpoint(handlers::message_handler))
+        .branch(Update::filter_callback_query().endpoint(handlers::callback_handler));
 
     Dispatcher::builder(bot, handler)
-        .dependencies(dptree::deps![pool, ai_service])
+        .dependencies(dptree::deps![pool.clone(), ai_service, pool])
         .enable_ctrlc_handler()
         .build()
         .dispatch()
