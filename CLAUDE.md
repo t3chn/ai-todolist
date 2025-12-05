@@ -6,9 +6,9 @@ Telegram бот — AI-powered todolist который не просто нап�
 
 - **Language:** Rust
 - **Bot Framework:** teloxide
-- **Database:** SQLite (sqlx)
+- **Database:** PostgreSQL (shuttle shared-db)
 - **AI:** OpenAI API (gpt-4o-mini)
-- **Hosting:** Fly.io (free tier)
+- **Hosting:** Shuttle.dev (free tier)
 
 ## Project Structure
 
@@ -24,18 +24,15 @@ src/
 ## Commands
 
 ```bash
-cargo run                 # Run locally (needs TELOXIDE_TOKEN)
-cargo build --release     # Build for production
-flyctl deploy             # Deploy to Fly.io
-flyctl secrets set TELOXIDE_TOKEN=xxx OPENAI_API_KEY=xxx  # Set secrets
+cargo shuttle run         # Run locally
+cargo shuttle deploy      # Deploy to Shuttle.dev
 ```
 
-## Environment Variables
+## Secrets (Secrets.toml)
 
-```
-TELOXIDE_TOKEN=          # Bot token from @BotFather
-OPENAI_API_KEY=          # OpenAI API key
-DATABASE_URL=sqlite:data/bot.db
+```toml
+TELOXIDE_TOKEN = "xxx"   # Bot token from @BotFather
+OPENAI_API_KEY = "xxx"   # OpenAI API key
 ```
 
 ## beads

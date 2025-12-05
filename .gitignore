@@ -1,5 +1,6 @@
 /target
 .env
+Secrets.toml
 data/
 *.db
 *.db-journal
