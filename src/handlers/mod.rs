@@ -1,5 +1,5 @@
 use crate::models::{Task, TaskStatus, User};
-use crate::services::AiService;
+use crate::services::{AiService, ParsedInput};
 use chrono::Utc;
 use sqlx::SqlitePool;
 use std::sync::Arc;
@@ -110,37 +110,58 @@ pub async fn message_handler(
                         Ok(transcript) => {
                             tracing::info!("Transcribed: {}", transcript);
 
-                            // Parse task from transcript
+                            // Parse input from transcript
                             let current_date = Utc::now().format("%Y-%m-%d %H:%M").to_string();
-                            let (title, due_at) = match ai.parse_task(&transcript, &current_date).await {
-                                Ok(parsed) => (parsed.title, parsed.due_at),
-                                Err(e) => {
-                                    tracing::warn!("AI parse failed: {}, using transcript", e);
-                                    (transcript.clone(), None)
-                                }
-                            };
+                            match ai.parse_input(&transcript, &current_date).await {
+                                Ok(ParsedInput::Task(parsed)) => {
+                                    match Task::create(&pool, user.id, &parsed.title, None, parsed.due_at.as_deref()).await {
+                                        Ok(task) => {
+                                            if task.due_at.is_some() {
+                                                let _ = Task::set_reminder_from_due(&pool, task.id).await;
+                                            }
 
-                            match Task::create(&pool, user.id, &title, None, due_at.as_deref()).await {
-                                Ok(task) => {
-                                    if task.due_at.is_some() {
-                                        let _ = Task::set_reminder_from_due(&pool, task.id).await;
+                                            let due_str = task.due_at.as_ref()
+                                                .map(|d| format!("\n📅 {}", d))
+                                                .unwrap_or_default();
+
+                                            bot.send_message(
+                                                msg.chat.id,
+                                                format!("🎤 \"{}\"\n\n✅ Added!\n\n📝 {}{}", transcript, task.title, due_str),
+                                            )
+                                            .reply_markup(task_keyboard(task.id))
+                                            .await?;
+                                        }
+                                        Err(e) => {
+                                            tracing::error!("Failed to create task: {}", e);
+                                            bot.send_message(msg.chat.id, "❌ Failed to create task")
+                                                .await?;
+                                        }
                                     }
-
-                                    let due_str = task.due_at.as_ref()
-                                        .map(|d| format!("\n📅 {}", d))
-                                        .unwrap_or_default();
-
+                                }
+                                Ok(ParsedInput::Draft { recipient, context: _, draft }) => {
                                     bot.send_message(
                                         msg.chat.id,
-                                        format!("🎤 \"{}\"\n\n✅ Added!\n\n📝 {}{}", transcript, task.title, due_str),
+                                        format!("🎤 \"{}\"\n\n✉️ Draft for {}:\n\n{}\n\n💡 Copy and send!", transcript, recipient, draft),
                                     )
-                                    .reply_markup(task_keyboard(task.id))
                                     .await?;
                                 }
                                 Err(e) => {
-                                    tracing::error!("Failed to create task: {}", e);
-                                    bot.send_message(msg.chat.id, "❌ Failed to create task")
-                                        .await?;
+                                    tracing::warn!("AI parse failed: {}, using transcript as task", e);
+                                    match Task::create(&pool, user.id, &transcript, None, None).await {
+                                        Ok(task) => {
+                                            bot.send_message(
+                                                msg.chat.id,
+                                                format!("🎤 \"{}\"\n\n✅ Added!\n\n📝 {}", transcript, task.title),
+                                            )
+                                            .reply_markup(task_keyboard(task.id))
+                                            .await?;
+                                        }
+                                        Err(e) => {
+                                            tracing::error!("Failed to create task: {}", e);
+                                            bot.send_message(msg.chat.id, "❌ Failed to create task")
+                                                .await?;
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -163,44 +184,78 @@ pub async fn message_handler(
         // Natural language input
         if let Some(tg_user) = telegram_user {
             if let Some(user) = User::find_by_telegram_id(&pool, tg_user.id.0 as i64).await {
-                let (title, due_at) = if let Some(ai) = &ai_service {
+                if let Some(ai) = &ai_service {
                     let current_date = Utc::now().format("%Y-%m-%d %H:%M").to_string();
-                    match ai.parse_task(text, &current_date).await {
-                        Ok(parsed) => {
-                            tracing::info!("AI parsed: {:?}", parsed);
-                            (parsed.title, parsed.due_at)
+                    match ai.parse_input(text, &current_date).await {
+                        Ok(ParsedInput::Task(parsed)) => {
+                            tracing::info!("AI parsed task: {:?}", parsed);
+                            match Task::create(&pool, user.id, &parsed.title, None, parsed.due_at.as_deref()).await {
+                                Ok(task) => {
+                                    if task.due_at.is_some() {
+                                        let _ = Task::set_reminder_from_due(&pool, task.id).await;
+                                    }
+
+                                    let due_str = task.due_at.as_ref()
+                                        .map(|d| format!("\n📅 {}", d))
+                                        .unwrap_or_default();
+
+                                    bot.send_message(
+                                        msg.chat.id,
+                                        format!("✅ Added!\n\n📝 {}{}", task.title, due_str),
+                                    )
+                                    .reply_markup(task_keyboard(task.id))
+                                    .await?;
+                                }
+                                Err(e) => {
+                                    tracing::error!("Failed to create task: {}", e);
+                                    bot.send_message(msg.chat.id, "❌ Failed to create task")
+                                        .await?;
+                                }
+                            }
+                        }
+                        Ok(ParsedInput::Draft { recipient, context: _, draft }) => {
+                            tracing::info!("AI generated draft for: {}", recipient);
+                            bot.send_message(
+                                msg.chat.id,
+                                format!("✉️ Draft for {}:\n\n{}\n\n💡 Copy and send!", recipient, draft),
+                            )
+                            .await?;
                         }
                         Err(e) => {
-                            tracing::warn!("AI parse failed: {}, using raw text", e);
-                            (text.to_string(), None)
+                            tracing::warn!("AI parse failed: {}, creating task with raw text", e);
+                            match Task::create(&pool, user.id, text, None, None).await {
+                                Ok(task) => {
+                                    bot.send_message(
+                                        msg.chat.id,
+                                        format!("✅ Added!\n\n📝 {}", task.title),
+                                    )
+                                    .reply_markup(task_keyboard(task.id))
+                                    .await?;
+                                }
+                                Err(e) => {
+                                    tracing::error!("Failed to create task: {}", e);
+                                    bot.send_message(msg.chat.id, "❌ Failed to create task")
+                                        .await?;
+                                }
+                            }
                         }
                     }
                 } else {
-                    (text.to_string(), None)
-                };
-
-                match Task::create(&pool, user.id, &title, None, due_at.as_deref()).await {
-                    Ok(task) => {
-                        // Set reminder 30 min before due time
-                        if task.due_at.is_some() {
-                            let _ = Task::set_reminder_from_due(&pool, task.id).await;
-                        }
-
-                        let due_str = task.due_at.as_ref()
-                            .map(|d| format!("\n📅 {}", d))
-                            .unwrap_or_default();
-
-                        bot.send_message(
-                            msg.chat.id,
-                            format!("✅ Added!\n\n📝 {}{}", task.title, due_str),
-                        )
-                        .reply_markup(task_keyboard(task.id))
-                        .await?;
-                    }
-                    Err(e) => {
-                        tracing::error!("Failed to create task: {}", e);
-                        bot.send_message(msg.chat.id, "❌ Failed to create task")
+                    // No AI service, create raw task
+                    match Task::create(&pool, user.id, text, None, None).await {
+                        Ok(task) => {
+                            bot.send_message(
+                                msg.chat.id,
+                                format!("✅ Added!\n\n📝 {}", task.title),
+                            )
+                            .reply_markup(task_keyboard(task.id))
                             .await?;
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to create task: {}", e);
+                            bot.send_message(msg.chat.id, "❌ Failed to create task")
+                                .await?;
+                        }
                     }
                 }
             } else {

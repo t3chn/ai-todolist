@@ -43,6 +43,15 @@ pub struct ParsedTask {
     pub tags: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "intent")]
+pub enum ParsedInput {
+    #[serde(rename = "task")]
+    Task(ParsedTask),
+    #[serde(rename = "draft")]
+    Draft { recipient: String, context: String, draft: String },
+}
+
 impl AiService {
     pub fn new(api_key: String) -> Self {
         Self {
@@ -114,6 +123,88 @@ Examples:
             .unwrap_or_default();
 
         // Clean up response (remove markdown if present)
+        let json_str = content
+            .trim()
+            .trim_start_matches("```json")
+            .trim_start_matches("```")
+            .trim_end_matches("```")
+            .trim();
+
+        serde_json::from_str(json_str)
+            .map_err(|e| format!("Parse JSON failed: {} - content: {}", e, json_str))
+    }
+
+    /// Parse input with intent classification (task or draft)
+    pub async fn parse_input(&self, input: &str, current_date: &str) -> Result<ParsedInput, String> {
+        let system_prompt = format!(
+            r#"You are an assistant that classifies user input and takes appropriate action.
+
+Current date: {current_date}
+
+Classify the input into one of these intents:
+1. "task" - Creating a task/reminder/todo
+2. "draft" - Drafting a message to someone
+
+Return JSON only, no markdown.
+
+For TASK intent:
+{{"intent": "task", "title": "task title", "due_at": "YYYY-MM-DD HH:MM" or null, "tags": ["tag1"]}}
+
+For DRAFT intent (when user wants to write/draft/compose a message):
+{{"intent": "draft", "recipient": "who the message is for", "context": "what the message is about", "draft": "the actual drafted message"}}
+
+Rules:
+- Keep the original language of the input
+- For drafts: write a professional, friendly message based on context
+- Look for keywords: "draft", "write", "compose", "message to", "напиши", "черновик"
+
+Examples:
+"call mom tomorrow" -> {{"intent": "task", "title": "Call mom", "due_at": "2024-01-02", "tags": ["personal"]}}
+"draft a message to John about the meeting" -> {{"intent": "draft", "recipient": "John", "context": "meeting", "draft": "Hi John,\n\nI wanted to follow up about our meeting..."}}
+"напиши сообщение боссу что опаздываю" -> {{"intent": "draft", "recipient": "boss", "context": "running late", "draft": "Добрый день,\n\nПрошу прощения, но я немного задержусь..."}}"#
+        );
+
+        let request = ChatRequest {
+            model: "gpt-5-nano".to_string(),
+            messages: vec![
+                ChatMessage {
+                    role: "system".to_string(),
+                    content: system_prompt,
+                },
+                ChatMessage {
+                    role: "user".to_string(),
+                    content: input.to_string(),
+                },
+            ],
+            reasoning: None,
+        };
+
+        let response = self
+            .client
+            .post("https://api.openai.com/v1/chat/completions")
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| format!("Request failed: {}", e))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let text = response.text().await.unwrap_or_default();
+            return Err(format!("API error {}: {}", status, text));
+        }
+
+        let chat_response: ChatResponse = response
+            .json()
+            .await
+            .map_err(|e| format!("Parse response failed: {}", e))?;
+
+        let content = chat_response
+            .choices
+            .first()
+            .map(|c| c.message.content.clone())
+            .unwrap_or_default();
+
         let json_str = content
             .trim()
             .trim_start_matches("```json")

@@ -2,4 +2,4 @@ mod ai;
 pub mod morning_brief;
 pub mod reminder;
 
-pub use ai::{AiService, ParsedTask};
+pub use ai::{AiService, ParsedInput, ParsedTask};
