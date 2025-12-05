@@ -8,7 +8,7 @@ mod handlers;
 mod models;
 mod services;
 
-use services::AiService;
+use services::{AiService, reminder};
 
 #[tokio::main]
 async fn main() {
@@ -42,6 +42,13 @@ async fn main() {
     let handler = dptree::entry()
         .branch(Update::filter_message().endpoint(handlers::message_handler))
         .branch(Update::filter_callback_query().endpoint(handlers::callback_handler));
+
+    // Start reminder service in background
+    let reminder_bot = bot.clone();
+    let reminder_pool = pool.clone();
+    tokio::spawn(async move {
+        reminder::start_reminder_loop(reminder_bot, reminder_pool).await;
+    });
 
     Dispatcher::builder(bot, handler)
         .dependencies(dptree::deps![pool.clone(), ai_service, pool])

@@ -115,6 +115,11 @@ pub async fn message_handler(
 
                 match Task::create(&pool, user.id, &title, None, due_at.as_deref()).await {
                     Ok(task) => {
+                        // Set reminder 30 min before due time
+                        if task.due_at.is_some() {
+                            let _ = Task::set_reminder_from_due(&pool, task.id).await;
+                        }
+
                         let due_str = task.due_at.as_ref()
                             .map(|d| format!("\n📅 {}", d))
                             .unwrap_or_default();
@@ -191,6 +196,35 @@ pub async fn callback_handler(
                 }
 
                 bot.answer_callback_query(q.id).text("🗑 Deleted").await?;
+            }
+        }
+    } else if let Some(snooze_data) = data.strip_prefix("snooze:") {
+        // Format: snooze:task_id:minutes
+        let parts: Vec<&str> = snooze_data.split(':').collect();
+        if parts.len() == 2 {
+            if let (Ok(task_id), Ok(minutes)) = (parts[0].parse::<i64>(), parts[1].parse::<i64>()) {
+                if let Some(task) = Task::find_by_id(&pool, task_id).await {
+                    let _ = Task::snooze_reminder(&pool, task_id, minutes).await;
+
+                    let snooze_text = if minutes == 60 {
+                        "1 hour"
+                    } else if minutes == 1440 {
+                        "tomorrow"
+                    } else {
+                        "later"
+                    };
+
+                    if let Some(msg) = q.message {
+                        bot.edit_message_text(
+                            msg.chat().id,
+                            msg.id(),
+                            format!("⏰ Snoozed: {}\n\nI'll remind you {}.", task.title, snooze_text),
+                        )
+                        .await?;
+                    }
+
+                    bot.answer_callback_query(q.id).text(format!("⏰ Snoozed for {}", snooze_text)).await?;
+                }
             }
         }
     }
