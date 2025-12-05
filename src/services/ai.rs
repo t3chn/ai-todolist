@@ -135,7 +135,11 @@ Examples:
     }
 
     /// Parse input with intent classification (task or draft)
-    pub async fn parse_input(&self, input: &str, current_date: &str) -> Result<ParsedInput, String> {
+    pub async fn parse_input(&self, input: &str, current_date: &str, context: Option<&str>) -> Result<ParsedInput, String> {
+        let context_section = context
+            .map(|c| format!("\n\nRecent conversation:\n{}\n", c))
+            .unwrap_or_default();
+
         let system_prompt = format!(
             r#"You are an assistant that classifies user input and takes appropriate action.
 
@@ -161,7 +165,8 @@ Rules:
 Examples:
 "call mom tomorrow" -> {{"intent": "task", "title": "Call mom", "due_at": "2024-01-02", "tags": ["personal"]}}
 "draft a message to John about the meeting" -> {{"intent": "draft", "recipient": "John", "context": "meeting", "draft": "Hi John,\n\nI wanted to follow up about our meeting..."}}
-"напиши сообщение боссу что опаздываю" -> {{"intent": "draft", "recipient": "boss", "context": "running late", "draft": "Добрый день,\n\nПрошу прощения, но я немного задержусь..."}}"#
+"напиши сообщение боссу что опаздываю" -> {{"intent": "draft", "recipient": "boss", "context": "running late", "draft": "Добрый день,\n\nПрошу прощения, но я немного задержусь..."}}
+{context_section}"#
         );
 
         let request = ChatRequest {

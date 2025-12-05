@@ -1,5 +1,5 @@
 use crate::models::{Task, TaskStatus, User};
-use crate::services::{AiService, ParsedInput};
+use crate::services::{AiService, ConversationContext, ParsedInput};
 use chrono::Utc;
 use sqlx::SqlitePool;
 use std::sync::Arc;
@@ -34,6 +34,7 @@ pub async fn message_handler(
     msg: Message,
     pool: Arc<SqlitePool>,
     ai_service: Option<Arc<AiService>>,
+    context: Arc<ConversationContext>,
 ) -> ResponseResult<()> {
     let text = msg.text().unwrap_or_default();
     let telegram_user = msg.from.as_ref();
@@ -112,7 +113,10 @@ pub async fn message_handler(
 
                             // Parse input from transcript
                             let current_date = Utc::now().format("%Y-%m-%d %H:%M").to_string();
-                            match ai.parse_input(&transcript, &current_date).await {
+                            let user_context = context.get_context(user.id);
+                            context.add_message(user.id, "user", &transcript);
+
+                            match ai.parse_input(&transcript, &current_date, user_context.as_deref()).await {
                                 Ok(ParsedInput::Task(parsed)) => {
                                     match Task::create(&pool, user.id, &parsed.title, None, parsed.due_at.as_deref()).await {
                                         Ok(task) => {
@@ -186,7 +190,12 @@ pub async fn message_handler(
             if let Some(user) = User::find_by_telegram_id(&pool, tg_user.id.0 as i64).await {
                 if let Some(ai) = &ai_service {
                     let current_date = Utc::now().format("%Y-%m-%d %H:%M").to_string();
-                    match ai.parse_input(text, &current_date).await {
+                    let user_context = context.get_context(user.id);
+
+                    // Add user message to context
+                    context.add_message(user.id, "user", text);
+
+                    match ai.parse_input(text, &current_date, user_context.as_deref()).await {
                         Ok(ParsedInput::Task(parsed)) => {
                             tracing::info!("AI parsed task: {:?}", parsed);
                             match Task::create(&pool, user.id, &parsed.title, None, parsed.due_at.as_deref()).await {
@@ -198,6 +207,9 @@ pub async fn message_handler(
                                     let due_str = task.due_at.as_ref()
                                         .map(|d| format!("\n📅 {}", d))
                                         .unwrap_or_default();
+
+                                    let response = format!("Added task: {}{}", task.title, due_str);
+                                    context.add_message(user.id, "assistant", &response);
 
                                     bot.send_message(
                                         msg.chat.id,
@@ -213,8 +225,11 @@ pub async fn message_handler(
                                 }
                             }
                         }
-                        Ok(ParsedInput::Draft { recipient, context: _, draft }) => {
+                        Ok(ParsedInput::Draft { recipient, context: ctx, draft }) => {
                             tracing::info!("AI generated draft for: {}", recipient);
+                            let response = format!("Draft for {}: {}", recipient, ctx);
+                            context.add_message(user.id, "assistant", &response);
+
                             bot.send_message(
                                 msg.chat.id,
                                 format!("✉️ Draft for {}:\n\n{}\n\n💡 Copy and send!", recipient, draft),

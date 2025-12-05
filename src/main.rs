@@ -8,7 +8,7 @@ mod handlers;
 mod models;
 mod services;
 
-use services::{AiService, morning_brief, reminder};
+use services::{AiService, ConversationContext, morning_brief, reminder};
 
 #[tokio::main]
 async fn main() {
@@ -38,6 +38,7 @@ async fn main() {
 
     let pool = Arc::new(pool);
     let bot = Bot::from_env();
+    let context = Arc::new(ConversationContext::new());
 
     let handler = dptree::entry()
         .branch(Update::filter_message().endpoint(handlers::message_handler))
@@ -58,7 +59,7 @@ async fn main() {
     });
 
     Dispatcher::builder(bot, handler)
-        .dependencies(dptree::deps![pool.clone(), ai_service, pool])
+        .dependencies(dptree::deps![pool.clone(), ai_service, context, pool])
         .enable_ctrlc_handler()
         .build()
         .dispatch()
