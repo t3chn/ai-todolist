@@ -228,8 +228,11 @@ Examples:
             .mime_str("audio/ogg")
             .map_err(|e| format!("Failed to create multipart: {}", e))?;
 
+        // Note: language hint helps Whisper with short audio clips
+        // Using "ru" for Russian, but Whisper will still detect other languages
         let form = multipart::Form::new()
             .text("model", "whisper-1")
+            .text("language", "ru")
             .part("file", part);
 
         let response = self
