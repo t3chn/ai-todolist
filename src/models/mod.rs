@@ -1,1 +1,5 @@
-// Models module - data structures
+mod task;
+mod user;
+
+pub use task::{Task, TaskStatus};
+pub use user::User;
