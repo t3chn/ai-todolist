@@ -9,15 +9,41 @@ pub struct Message {
     pub content: String,
 }
 
+/// Pending edit state for a user
+#[derive(Debug, Clone)]
+pub enum PendingEdit {
+    Title(i64),  // task_id - waiting for new title
+}
+
 pub struct ConversationContext {
     contexts: Mutex<HashMap<i64, Vec<Message>>>,
+    pending_edits: Mutex<HashMap<i64, PendingEdit>>,  // user_id -> pending edit
 }
 
 impl ConversationContext {
     pub fn new() -> Self {
         Self {
             contexts: Mutex::new(HashMap::new()),
+            pending_edits: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Set pending edit for user
+    pub fn set_pending_edit(&self, user_id: i64, edit: PendingEdit) {
+        let mut edits = self.pending_edits.lock().unwrap();
+        edits.insert(user_id, edit);
+    }
+
+    /// Get and clear pending edit for user
+    pub fn take_pending_edit(&self, user_id: i64) -> Option<PendingEdit> {
+        let mut edits = self.pending_edits.lock().unwrap();
+        edits.remove(&user_id)
+    }
+
+    /// Check if user has pending edit
+    pub fn has_pending_edit(&self, user_id: i64) -> bool {
+        let edits = self.pending_edits.lock().unwrap();
+        edits.contains_key(&user_id)
     }
 
     /// Add a message to user's conversation context

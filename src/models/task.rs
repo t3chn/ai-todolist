@@ -219,4 +219,38 @@ impl Task {
         .await
         .unwrap_or(0)
     }
+
+    /// Update task title and/or due_at
+    pub async fn update(
+        pool: &SqlitePool,
+        id: i64,
+        title: Option<&str>,
+        due_at: Option<Option<&str>>,
+    ) -> Result<(), sqlx::Error> {
+        if let Some(new_title) = title {
+            sqlx::query("UPDATE tasks SET title = ?, updated_at = datetime('now') WHERE id = ?")
+                .bind(new_title)
+                .bind(id)
+                .execute(pool)
+                .await?;
+        }
+        if let Some(new_due) = due_at {
+            sqlx::query("UPDATE tasks SET due_at = ?, updated_at = datetime('now') WHERE id = ?")
+                .bind(new_due)
+                .bind(id)
+                .execute(pool)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Set custom reminder time
+    pub async fn set_reminder(pool: &SqlitePool, id: i64, reminder_at: Option<&str>) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE tasks SET reminder_at = ?, updated_at = datetime('now') WHERE id = ?")
+            .bind(reminder_at)
+            .bind(id)
+            .execute(pool)
+            .await?;
+        Ok(())
+    }
 }

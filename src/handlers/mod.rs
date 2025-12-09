@@ -1,5 +1,5 @@
 use crate::models::{Task, TaskStatus, User};
-use crate::services::{AiService, ConversationContext, ParsedInput};
+use crate::services::{AiService, ConversationContext, ParsedInput, PendingEdit};
 use chrono::Utc;
 use sqlx::SqlitePool;
 use std::sync::Arc;
@@ -27,10 +27,16 @@ pub enum Command {
 }
 
 fn task_keyboard(task_id: i64) -> InlineKeyboardMarkup {
-    InlineKeyboardMarkup::new(vec![vec![
-        InlineKeyboardButton::callback("✅ Done", format!("done:{}", task_id)),
-        InlineKeyboardButton::callback("🗑 Delete", format!("delete:{}", task_id)),
-    ]])
+    InlineKeyboardMarkup::new(vec![
+        vec![
+            InlineKeyboardButton::callback("✅ Done", format!("done:{}", task_id)),
+            InlineKeyboardButton::callback("🗑 Delete", format!("delete:{}", task_id)),
+        ],
+        vec![
+            InlineKeyboardButton::callback("✏️ Edit", format!("edit:{}", task_id)),
+            InlineKeyboardButton::callback("⏰ Remind", format!("remind:{}", task_id)),
+        ],
+    ])
 }
 
 pub async fn message_handler(
@@ -296,9 +302,44 @@ Or try:\n\
             }
         }
     } else if !text.starts_with('/') && !text.is_empty() {
-        // Natural language input
+        // Check for pending edit first
         if let Some(tg_user) = telegram_user {
             if let Some(user) = User::find_by_telegram_id(&pool, tg_user.id.0 as i64).await {
+                // Handle pending edit if exists
+                if let Some(pending) = context.take_pending_edit(user.id) {
+                    match pending {
+                        PendingEdit::Title(task_id) => {
+                            if let Some(task) = Task::find_by_id(&pool, task_id).await {
+                                let _ = Task::update(&pool, task_id, Some(text), None).await;
+
+                                // Reload task to get updated data
+                                if let Some(updated_task) = Task::find_by_id(&pool, task_id).await {
+                                    let due_str = updated_task.due_at.as_ref()
+                                        .map(|d| format!("\n📅 {}", d))
+                                        .unwrap_or_default();
+
+                                    bot.send_message(
+                                        msg.chat.id,
+                                        format!("✅ Title updated!\n\n📝 {}{}", updated_task.title, due_str),
+                                    )
+                                    .reply_markup(task_keyboard(task_id))
+                                    .await?;
+                                } else {
+                                    bot.send_message(
+                                        msg.chat.id,
+                                        format!("✅ Updated: {}", text),
+                                    )
+                                    .await?;
+                                }
+                            } else {
+                                bot.send_message(msg.chat.id, "❌ Task not found").await?;
+                            }
+                            return Ok(());
+                        }
+                    }
+                }
+
+                // Natural language input
                 if let Some(ai) = &ai_service {
                     // Show typing indicator while AI processes
                     let _ = bot.send_chat_action(msg.chat.id, ChatAction::Typing).await;
@@ -401,6 +442,7 @@ pub async fn callback_handler(
     bot: Bot,
     q: CallbackQuery,
     pool: Arc<SqlitePool>,
+    context: Arc<ConversationContext>,
 ) -> ResponseResult<()> {
     let data = q.data.unwrap_or_default();
 
@@ -695,6 +737,256 @@ pub async fn callback_handler(
         }
 
         bot.answer_callback_query(q.id).await?;
+    } else if let Some(task_id_str) = data.strip_prefix("edit:") {
+        // Show edit options
+        if let Ok(task_id) = task_id_str.parse::<i64>() {
+            if let Some(task) = Task::find_by_id(&pool, task_id).await {
+                let edit_keyboard = InlineKeyboardMarkup::new(vec![
+                    vec![
+                        InlineKeyboardButton::callback("📝 Edit title", format!("edit_title:{}", task_id)),
+                        InlineKeyboardButton::callback("📅 Edit date", format!("edit_date:{}", task_id)),
+                    ],
+                    vec![
+                        InlineKeyboardButton::callback("↩️ Back", format!("cancel_delete:{}", task_id)),
+                    ],
+                ]);
+
+                if let Some(msg) = &q.message {
+                    let due_str = task.due_at.as_ref()
+                        .map(|d| format!("\n📅 {}", d))
+                        .unwrap_or_else(|| "\n📅 No due date".to_string());
+
+                    bot.edit_message_text(
+                        msg.chat().id,
+                        msg.id(),
+                        format!("✏️ Edit task:\n\n📝 {}{}\n\nWhat would you like to change?", task.title, due_str),
+                    )
+                    .reply_markup(edit_keyboard)
+                    .await?;
+                }
+
+                bot.answer_callback_query(q.id).await?;
+            }
+        }
+    } else if let Some(task_id_str) = data.strip_prefix("edit_title:") {
+        // Prompt user to send new title
+        if let Ok(task_id) = task_id_str.parse::<i64>() {
+            if let Some(task) = Task::find_by_id(&pool, task_id).await {
+                // Get user to set pending edit
+                let telegram_id = q.from.id.0 as i64;
+                if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
+                    context.set_pending_edit(user.id, PendingEdit::Title(task_id));
+                }
+
+                if let Some(msg) = &q.message {
+                    let cancel_keyboard = InlineKeyboardMarkup::new(vec![vec![
+                        InlineKeyboardButton::callback("↩️ Cancel", format!("cancel_edit:{}", task_id)),
+                    ]]);
+
+                    bot.edit_message_text(
+                        msg.chat().id,
+                        msg.id(),
+                        format!("📝 Current: {}\n\nSend new title:", task.title),
+                    )
+                    .reply_markup(cancel_keyboard)
+                    .await?;
+                }
+
+                bot.answer_callback_query(q.id).text("Send new title").await?;
+            }
+        }
+    } else if let Some(task_id_str) = data.strip_prefix("cancel_edit:") {
+        // Cancel pending edit and restore task view
+        if let Ok(task_id) = task_id_str.parse::<i64>() {
+            // Clear pending edit
+            let telegram_id = q.from.id.0 as i64;
+            if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
+                let _ = context.take_pending_edit(user.id);
+            }
+
+            if let Some(task) = Task::find_by_id(&pool, task_id).await {
+                if let Some(msg) = &q.message {
+                    let due_str = task.due_at.as_ref()
+                        .map(|d| format!("\n📅 {}", d))
+                        .unwrap_or_default();
+
+                    bot.edit_message_text(
+                        msg.chat().id,
+                        msg.id(),
+                        format!("📝 {}{}", task.title, due_str),
+                    )
+                    .reply_markup(task_keyboard(task_id))
+                    .await?;
+                }
+            }
+
+            bot.answer_callback_query(q.id).text("Cancelled").await?;
+        }
+    } else if let Some(task_id_str) = data.strip_prefix("edit_date:") {
+        // Show date options
+        if let Ok(task_id) = task_id_str.parse::<i64>() {
+            if Task::find_by_id(&pool, task_id).await.is_some() {
+                let date_keyboard = InlineKeyboardMarkup::new(vec![
+                    vec![
+                        InlineKeyboardButton::callback("📅 Today", format!("set_date:{}:today", task_id)),
+                        InlineKeyboardButton::callback("📅 Tomorrow", format!("set_date:{}:tomorrow", task_id)),
+                    ],
+                    vec![
+                        InlineKeyboardButton::callback("📅 Next week", format!("set_date:{}:next_week", task_id)),
+                        InlineKeyboardButton::callback("🚫 Remove date", format!("set_date:{}:none", task_id)),
+                    ],
+                    vec![
+                        InlineKeyboardButton::callback("↩️ Back", format!("edit:{}", task_id)),
+                    ],
+                ]);
+
+                if let Some(msg) = &q.message {
+                    bot.edit_message_text(
+                        msg.chat().id,
+                        msg.id(),
+                        "📅 Select new due date:",
+                    )
+                    .reply_markup(date_keyboard)
+                    .await?;
+                }
+
+                bot.answer_callback_query(q.id).await?;
+            }
+        }
+    } else if let Some(date_data) = data.strip_prefix("set_date:") {
+        // Format: set_date:task_id:option
+        let parts: Vec<&str> = date_data.split(':').collect();
+        if parts.len() == 2 {
+            if let Ok(task_id) = parts[0].parse::<i64>() {
+                let option = parts[1];
+                let new_due = match option {
+                    "today" => Some(Utc::now().format("%Y-%m-%d 18:00").to_string()),
+                    "tomorrow" => Some((Utc::now() + chrono::Duration::days(1)).format("%Y-%m-%d 18:00").to_string()),
+                    "next_week" => Some((Utc::now() + chrono::Duration::days(7)).format("%Y-%m-%d 18:00").to_string()),
+                    "none" => None,
+                    _ => None,
+                };
+
+                let _ = Task::update(&pool, task_id, None, Some(new_due.as_deref())).await;
+
+                // Update reminder if due date changed
+                if new_due.is_some() {
+                    let _ = Task::set_reminder_from_due(&pool, task_id).await;
+                } else {
+                    let _ = Task::set_reminder(&pool, task_id, None).await;
+                }
+
+                if let Some(task) = Task::find_by_id(&pool, task_id).await {
+                    if let Some(msg) = &q.message {
+                        let due_str = task.due_at.as_ref()
+                            .map(|d| format!("\n📅 {}", d))
+                            .unwrap_or_default();
+
+                        bot.edit_message_text(
+                            msg.chat().id,
+                            msg.id(),
+                            format!("✅ Updated!\n\n📝 {}{}", task.title, due_str),
+                        )
+                        .reply_markup(task_keyboard(task_id))
+                        .await?;
+                    }
+                }
+
+                bot.answer_callback_query(q.id).text("✅ Date updated").await?;
+            }
+        }
+    } else if let Some(task_id_str) = data.strip_prefix("remind:") {
+        // Show reminder options
+        if let Ok(task_id) = task_id_str.parse::<i64>() {
+            if let Some(task) = Task::find_by_id(&pool, task_id).await {
+                let reminder_str = task.reminder_at.as_ref()
+                    .map(|r| format!("Current: {}", r))
+                    .unwrap_or_else(|| "No reminder set".to_string());
+
+                let remind_keyboard = InlineKeyboardMarkup::new(vec![
+                    vec![
+                        InlineKeyboardButton::callback("⏰ In 30 min", format!("set_remind:{}:30", task_id)),
+                        InlineKeyboardButton::callback("⏰ In 1 hour", format!("set_remind:{}:60", task_id)),
+                    ],
+                    vec![
+                        InlineKeyboardButton::callback("⏰ In 3 hours", format!("set_remind:{}:180", task_id)),
+                        InlineKeyboardButton::callback("⏰ Tomorrow 9am", format!("set_remind:{}:tomorrow", task_id)),
+                    ],
+                    vec![
+                        InlineKeyboardButton::callback("🚫 Remove reminder", format!("set_remind:{}:none", task_id)),
+                        InlineKeyboardButton::callback("↩️ Back", format!("cancel_delete:{}", task_id)),
+                    ],
+                ]);
+
+                if let Some(msg) = &q.message {
+                    bot.edit_message_text(
+                        msg.chat().id,
+                        msg.id(),
+                        format!("⏰ Set reminder for:\n\n📝 {}\n\n{}", task.title, reminder_str),
+                    )
+                    .reply_markup(remind_keyboard)
+                    .await?;
+                }
+
+                bot.answer_callback_query(q.id).await?;
+            }
+        }
+    } else if let Some(remind_data) = data.strip_prefix("set_remind:") {
+        // Format: set_remind:task_id:option
+        let parts: Vec<&str> = remind_data.split(':').collect();
+        if parts.len() == 2 {
+            if let Ok(task_id) = parts[0].parse::<i64>() {
+                let option = parts[1];
+
+                let (reminder_time, confirm_text) = match option {
+                    "30" => {
+                        let time = (Utc::now() + chrono::Duration::minutes(30)).format("%Y-%m-%d %H:%M").to_string();
+                        (Some(time), "in 30 minutes")
+                    },
+                    "60" => {
+                        let time = (Utc::now() + chrono::Duration::minutes(60)).format("%Y-%m-%d %H:%M").to_string();
+                        (Some(time), "in 1 hour")
+                    },
+                    "180" => {
+                        let time = (Utc::now() + chrono::Duration::minutes(180)).format("%Y-%m-%d %H:%M").to_string();
+                        (Some(time), "in 3 hours")
+                    },
+                    "tomorrow" => {
+                        let tomorrow = Utc::now() + chrono::Duration::days(1);
+                        let time = tomorrow.format("%Y-%m-%d").to_string() + " 09:00";
+                        (Some(time), "tomorrow at 9am")
+                    },
+                    "none" => (None, "removed"),
+                    _ => (None, "removed"),
+                };
+
+                let _ = Task::set_reminder(&pool, task_id, reminder_time.as_deref()).await;
+
+                if let Some(task) = Task::find_by_id(&pool, task_id).await {
+                    if let Some(msg) = &q.message {
+                        let due_str = task.due_at.as_ref()
+                            .map(|d| format!("\n📅 {}", d))
+                            .unwrap_or_default();
+
+                        let reminder_msg = if option == "none" {
+                            "🔕 Reminder removed".to_string()
+                        } else {
+                            format!("⏰ Reminder set {}", confirm_text)
+                        };
+
+                        bot.edit_message_text(
+                            msg.chat().id,
+                            msg.id(),
+                            format!("{}\n\n📝 {}{}", reminder_msg, task.title, due_str),
+                        )
+                        .reply_markup(task_keyboard(task_id))
+                        .await?;
+                    }
+                }
+
+                bot.answer_callback_query(q.id).text(format!("⏰ Reminder {}", confirm_text)).await?;
+            }
+        }
     }
 
     Ok(())
