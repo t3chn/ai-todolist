@@ -12,7 +12,9 @@ pub struct Message {
 /// Pending edit state for a user
 #[derive(Debug, Clone)]
 pub enum PendingEdit {
-    Title(i64),  // task_id - waiting for new title
+    Title(i64),           // task_id - waiting for new title
+    Reminder(i64),        // task_id - waiting for custom reminder time
+    Timezone,             // waiting for city name for timezone
 }
 
 pub struct ConversationContext {

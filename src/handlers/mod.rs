@@ -6,10 +6,9 @@ use std::sync::Arc;
 use teloxide::{
     net::Download,
     prelude::*,
-    types::{ChatAction, InlineKeyboardButton, InlineKeyboardMarkup},
+    types::{ChatAction, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, KeyboardMarkup, KeyboardRemove},
     utils::command::BotCommands,
 };
-use tokio::io::AsyncWriteExt;
 
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase", description = "Available commands:")]
@@ -37,6 +36,55 @@ fn task_keyboard(task_id: i64) -> InlineKeyboardMarkup {
             InlineKeyboardButton::callback("⏰ Remind", format!("remind:{}", task_id)),
         ],
     ])
+}
+
+/// Format task as a nice card
+fn format_task(task: &Task) -> String {
+    let mut lines = vec![format!("📝 <b>{}</b>", task.title)];
+
+    if let Some(due) = &task.due_at {
+        lines.push(format!("📅 {}", due));
+    }
+
+    if let Some(reminder) = &task.reminder_at {
+        lines.push(format!("🔔 Reminder: {}", reminder));
+    }
+
+    lines.join("\n")
+}
+
+/// Get timezone from coordinates using a simple lookup
+fn timezone_from_coords(lat: f64, lon: f64) -> String {
+    // Simple timezone estimation based on longitude
+    // More accurate would be to use a timezone database or API
+    let offset_hours = (lon / 15.0).round() as i32;
+
+    // Map common regions
+    if lat > 35.0 && lat < 72.0 && lon > -10.0 && lon < 40.0 {
+        // Europe
+        if lon < 5.0 { return "Europe/London".to_string(); }
+        if lon < 15.0 { return "Europe/Paris".to_string(); }
+        if lon < 25.0 { return "Europe/Berlin".to_string(); }
+        if lon < 35.0 { return "Europe/Kyiv".to_string(); }
+        return "Europe/Moscow".to_string();
+    }
+    if lat > 35.0 && lat < 72.0 && lon > 35.0 && lon < 180.0 {
+        // Russia/Asia
+        if lon < 60.0 { return "Europe/Moscow".to_string(); }
+        if lon < 90.0 { return "Asia/Yekaterinburg".to_string(); }
+        if lon < 120.0 { return "Asia/Novosibirsk".to_string(); }
+        return "Asia/Vladivostok".to_string();
+    }
+    if lat > 25.0 && lat < 50.0 && lon > -130.0 && lon < -60.0 {
+        // North America
+        if lon < -115.0 { return "America/Los_Angeles".to_string(); }
+        if lon < -100.0 { return "America/Denver".to_string(); }
+        if lon < -85.0 { return "America/Chicago".to_string(); }
+        return "America/New_York".to_string();
+    }
+
+    // Fallback: UTC offset
+    format!("Etc/GMT{:+}", -offset_hours)
 }
 
 pub async fn message_handler(
@@ -71,20 +119,42 @@ pub async fn message_handler(
                         String::new()
                     };
 
-                    let welcome_keyboard = InlineKeyboardMarkup::new(vec![vec![
-                        InlineKeyboardButton::callback("📋 View tasks", "view_tasks"),
-                    ]]);
+                    let welcome_keyboard = InlineKeyboardMarkup::new(vec![
+                        vec![
+                            InlineKeyboardButton::callback("📋 My tasks", "view_tasks"),
+                            InlineKeyboardButton::callback("🌍 Set timezone", "settings:timezone"),
+                        ],
+                    ]);
 
                     bot.send_message(
                         msg.chat.id,
-                        format!("👋 Welcome to AI Todolist, {}!\n\n\
-I help you manage tasks using natural language.\n\n\
-🚀 Try it now! Send me:\n\
-> Call mom tomorrow at 5pm\n\n\
-Or try:\n\
-• 🎤 Voice message\n\
-• ✉️ \"Draft message to...\"{}", tg_user.first_name, trial_info),
+                        format!(
+"👋 Welcome, {}!
+
+I'm your AI-powered task manager.
+
+━━━━━━━━━━━━━━━━━━━━
+🚀 <b>Quick start</b>
+━━━━━━━━━━━━━━━━━━━━
+
+Just send me a task:
+• \"Call mom tomorrow at 5pm\"
+• \"Buy groceries\"
+• 🎤 Or send a voice message!
+
+━━━━━━━━━━━━━━━━━━━━
+✨ <b>Features</b>
+━━━━━━━━━━━━━━━━━━━━
+
+📝 Natural language tasks
+⏰ Smart reminders
+🎤 Voice input
+✉️ Message drafts
+{}
+
+💡 <b>Tip:</b> Set your timezone for accurate reminders!", tg_user.first_name, trial_info),
                     )
+                    .parse_mode(teloxide::types::ParseMode::Html)
                     .reply_markup(welcome_keyboard)
                     .await?;
                 } else {
@@ -210,6 +280,84 @@ Or try:\n\
                         Ok(transcript) => {
                             tracing::info!("Transcribed: {}", transcript);
 
+                            // Check if there's a pending edit that should use this voice input
+                            if let Some(pending) = context.take_pending_edit(user.id) {
+                                match pending {
+                                    PendingEdit::Title(task_id) => {
+                                        // Use transcript as new title
+                                        let _ = Task::update(&pool, task_id, Some(&transcript), None).await;
+
+                                        if let Some(updated_task) = Task::find_by_id(&pool, task_id).await {
+                                            let due_str = updated_task.due_at.as_ref()
+                                                .map(|d| format!("\n📅 {}", d))
+                                                .unwrap_or_default();
+
+                                            bot.edit_message_text(
+                                                msg.chat.id,
+                                                progress_msg.id,
+                                                format!("🎤 \"{}\"\n\n✅ Title updated!\n\n📝 {}{}", transcript, updated_task.title, due_str),
+                                            )
+                                            .reply_markup(task_keyboard(task_id))
+                                            .await?;
+                                        }
+                                        return Ok(());
+                                    }
+                                    PendingEdit::Reminder(task_id) => {
+                                        // Parse reminder time from transcript
+                                        let current_date = Utc::now().format("%Y-%m-%d %H:%M").to_string();
+
+                                        match ai.parse_reminder_time(&transcript, &current_date).await {
+                                            Ok(reminder_at) => {
+                                                let _ = Task::set_reminder(&pool, task_id, Some(&reminder_at)).await;
+
+                                                if let Some(task) = Task::find_by_id(&pool, task_id).await {
+                                                    bot.edit_message_text(
+                                                        msg.chat.id,
+                                                        progress_msg.id,
+                                                        format!("🎤 \"{}\"\n\n⏰ Reminder set!\n\n📝 {}\n🔔 {}", transcript, task.title, reminder_at),
+                                                    )
+                                                    .reply_markup(task_keyboard(task_id))
+                                                    .await?;
+                                                }
+                                            }
+                                            Err(e) => {
+                                                tracing::warn!("Failed to parse reminder time: {}", e);
+                                                let _ = bot.edit_message_text(
+                                                    msg.chat.id,
+                                                    progress_msg.id,
+                                                    format!("🎤 \"{}\"\n\n❌ Couldn't understand the time\n\n💡 Try: \"завтра в 9\" or \"in 2 hours\"", transcript),
+                                                ).await;
+                                            }
+                                        }
+                                        return Ok(());
+                                    }
+                                    PendingEdit::Timezone => {
+                                        // Parse timezone from transcript
+                                        match ai.parse_timezone(&transcript).await {
+                                            Ok(timezone) => {
+                                                let _ = User::update_timezone(&pool, user.id, &timezone).await;
+
+                                                bot.edit_message_text(
+                                                    msg.chat.id,
+                                                    progress_msg.id,
+                                                    format!("🎤 \"{}\"\n\n✅ Timezone set to: {}", transcript, timezone),
+                                                )
+                                                .await?;
+                                            }
+                                            Err(e) => {
+                                                tracing::warn!("Failed to parse timezone: {}", e);
+                                                let _ = bot.edit_message_text(
+                                                    msg.chat.id,
+                                                    progress_msg.id,
+                                                    format!("🎤 \"{}\"\n\n❌ Couldn't determine timezone\n\n💡 Try a major city name", transcript),
+                                                ).await;
+                                            }
+                                        }
+                                        return Ok(());
+                                    }
+                                }
+                            }
+
                             // Update progress with transcript
                             let _ = bot.edit_message_text(
                                 msg.chat.id,
@@ -301,6 +449,22 @@ Or try:\n\
                     .await?;
             }
         }
+    } else if let Some(location) = msg.location() {
+        // Handle location for timezone detection
+        if let Some(tg_user) = telegram_user {
+            if let Some(user) = User::find_by_telegram_id(&pool, tg_user.id.0 as i64).await {
+                let timezone = timezone_from_coords(location.latitude, location.longitude);
+                let _ = User::update_timezone(&pool, user.id, &timezone).await;
+
+                // Remove keyboard
+                bot.send_message(
+                    msg.chat.id,
+                    format!("✅ Timezone set to: {}\n\nYour reminders will now use this timezone.", timezone),
+                )
+                .reply_markup(KeyboardRemove::new())
+                .await?;
+            }
+        }
     } else if !text.starts_with('/') && !text.is_empty() {
         // Check for pending edit first
         if let Some(tg_user) = telegram_user {
@@ -309,7 +473,7 @@ Or try:\n\
                 if let Some(pending) = context.take_pending_edit(user.id) {
                     match pending {
                         PendingEdit::Title(task_id) => {
-                            if let Some(task) = Task::find_by_id(&pool, task_id).await {
+                            if Task::find_by_id(&pool, task_id).await.is_some() {
                                 let _ = Task::update(&pool, task_id, Some(text), None).await;
 
                                 // Reload task to get updated data
@@ -333,6 +497,71 @@ Or try:\n\
                                 }
                             } else {
                                 bot.send_message(msg.chat.id, "❌ Task not found").await?;
+                            }
+                            return Ok(());
+                        }
+                        PendingEdit::Reminder(task_id) => {
+                            // Parse custom reminder time with AI
+                            if let Some(ai) = &ai_service {
+                                let _ = bot.send_chat_action(msg.chat.id, ChatAction::Typing).await;
+                                let current_date = Utc::now().format("%Y-%m-%d %H:%M").to_string();
+
+                                match ai.parse_reminder_time(text, &current_date).await {
+                                    Ok(reminder_at) => {
+                                        let _ = Task::set_reminder(&pool, task_id, Some(&reminder_at)).await;
+
+                                        if let Some(task) = Task::find_by_id(&pool, task_id).await {
+                                            bot.send_message(
+                                                msg.chat.id,
+                                                format!("⏰ Reminder set!\n\n📝 {}\n🔔 {}", task.title, reminder_at),
+                                            )
+                                            .reply_markup(task_keyboard(task_id))
+                                            .await?;
+                                        }
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!("Failed to parse reminder time: {}", e);
+                                        bot.send_message(
+                                            msg.chat.id,
+                                            "❌ Couldn't understand the time\n\n💡 Try: \"завтра в 9\" or \"in 2 hours\"",
+                                        )
+                                        .await?;
+                                    }
+                                }
+                            } else {
+                                bot.send_message(msg.chat.id, "❌ AI service required for custom reminders")
+                                    .await?;
+                            }
+                            return Ok(());
+                        }
+                        PendingEdit::Timezone => {
+                            // Parse timezone from city name with AI
+                            if let Some(ai) = &ai_service {
+                                let _ = bot.send_chat_action(msg.chat.id, ChatAction::Typing).await;
+
+                                match ai.parse_timezone(text).await {
+                                    Ok(timezone) => {
+                                        let _ = User::update_timezone(&pool, user.id, &timezone).await;
+
+                                        bot.send_message(
+                                            msg.chat.id,
+                                            format!("✅ Timezone set to: {}\n\nYour reminders will now use this timezone.", timezone),
+                                        )
+                                        .reply_markup(KeyboardRemove::new())
+                                        .await?;
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!("Failed to parse timezone: {}", e);
+                                        bot.send_message(
+                                            msg.chat.id,
+                                            "❌ Couldn't determine timezone\n\n💡 Try a major city name like \"Moscow\" or \"New York\"",
+                                        )
+                                        .await?;
+                                    }
+                                }
+                            } else {
+                                bot.send_message(msg.chat.id, "❌ AI service required")
+                                    .await?;
                             }
                             return Ok(());
                         }
@@ -615,18 +844,26 @@ pub async fn callback_handler(
 
         bot.answer_callback_query(q.id).await?;
     } else if data == "settings:timezone" {
-        // Show timezone options
+        // Show timezone options with auto-detect
         let tz_keyboard = InlineKeyboardMarkup::new(vec![
             vec![
-                InlineKeyboardButton::callback("🇺🇸 US Eastern (UTC-5)", "tz:America/New_York"),
-                InlineKeyboardButton::callback("🇺🇸 US Pacific (UTC-8)", "tz:America/Los_Angeles"),
+                InlineKeyboardButton::callback("📍 Auto-detect", "tz:auto"),
+                InlineKeyboardButton::callback("🏙 Type city", "tz:city"),
             ],
             vec![
-                InlineKeyboardButton::callback("🇬🇧 London (UTC+0)", "tz:Europe/London"),
-                InlineKeyboardButton::callback("🇪🇺 Berlin (UTC+1)", "tz:Europe/Berlin"),
+                InlineKeyboardButton::callback("🇺🇸 New York", "tz:America/New_York"),
+                InlineKeyboardButton::callback("🇺🇸 Los Angeles", "tz:America/Los_Angeles"),
             ],
             vec![
-                InlineKeyboardButton::callback("🇷🇺 Moscow (UTC+3)", "tz:Europe/Moscow"),
+                InlineKeyboardButton::callback("🇬🇧 London", "tz:Europe/London"),
+                InlineKeyboardButton::callback("🇪🇺 Berlin", "tz:Europe/Berlin"),
+            ],
+            vec![
+                InlineKeyboardButton::callback("🇷🇺 Moscow", "tz:Europe/Moscow"),
+                InlineKeyboardButton::callback("🇺🇦 Kyiv", "tz:Europe/Kyiv"),
+            ],
+            vec![
+                InlineKeyboardButton::callback("🇯🇵 Tokyo", "tz:Asia/Tokyo"),
                 InlineKeyboardButton::callback("↩️ Back", "settings:back"),
             ],
         ]);
@@ -635,13 +872,47 @@ pub async fn callback_handler(
             bot.edit_message_text(
                 msg.chat().id,
                 msg.id(),
-                "🌍 Select your timezone:",
+                "🌍 Select your timezone:\n\n📍 Auto-detect uses your location\n🏙 Type city lets you enter any city",
             )
             .reply_markup(tz_keyboard)
             .await?;
         }
 
         bot.answer_callback_query(q.id).await?;
+    } else if data == "tz:auto" {
+        // Request location for auto-detect
+        if let Some(msg) = &q.message {
+            let location_keyboard = KeyboardMarkup::new(vec![vec![
+                KeyboardButton::new("📍 Share my location").request(teloxide::types::ButtonRequest::Location),
+            ]])
+            .resize_keyboard()
+            .one_time_keyboard();
+
+            bot.send_message(
+                msg.chat().id,
+                "📍 Tap the button below to share your location.\n\nI'll detect your timezone automatically.",
+            )
+            .reply_markup(location_keyboard)
+            .await?;
+        }
+
+        bot.answer_callback_query(q.id).await?;
+    } else if data == "tz:city" {
+        // Ask for city name
+        let telegram_id = q.from.id.0 as i64;
+        if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
+            context.set_pending_edit(user.id, PendingEdit::Timezone);
+        }
+
+        if let Some(msg) = &q.message {
+            bot.send_message(
+                msg.chat().id,
+                "🏙 Type your city name:\n\nExamples: Moscow, New York, Tokyo, Dubai",
+            )
+            .await?;
+        }
+
+        bot.answer_callback_query(q.id).text("Type your city").await?;
     } else if let Some(tz) = data.strip_prefix("tz:") {
         // Set timezone
         let telegram_id = q.from.id.0 as i64;
@@ -900,20 +1171,21 @@ pub async fn callback_handler(
         if let Ok(task_id) = task_id_str.parse::<i64>() {
             if let Some(task) = Task::find_by_id(&pool, task_id).await {
                 let reminder_str = task.reminder_at.as_ref()
-                    .map(|r| format!("Current: {}", r))
+                    .map(|r| format!("🔔 Current: {}", r))
                     .unwrap_or_else(|| "No reminder set".to_string());
 
                 let remind_keyboard = InlineKeyboardMarkup::new(vec![
                     vec![
-                        InlineKeyboardButton::callback("⏰ In 30 min", format!("set_remind:{}:30", task_id)),
-                        InlineKeyboardButton::callback("⏰ In 1 hour", format!("set_remind:{}:60", task_id)),
+                        InlineKeyboardButton::callback("⏰ 30 min", format!("set_remind:{}:30", task_id)),
+                        InlineKeyboardButton::callback("⏰ 1 hour", format!("set_remind:{}:60", task_id)),
+                        InlineKeyboardButton::callback("⏰ 3 hours", format!("set_remind:{}:180", task_id)),
                     ],
                     vec![
-                        InlineKeyboardButton::callback("⏰ In 3 hours", format!("set_remind:{}:180", task_id)),
                         InlineKeyboardButton::callback("⏰ Tomorrow 9am", format!("set_remind:{}:tomorrow", task_id)),
+                        InlineKeyboardButton::callback("✍️ Custom", format!("set_remind:{}:custom", task_id)),
                     ],
                     vec![
-                        InlineKeyboardButton::callback("🚫 Remove reminder", format!("set_remind:{}:none", task_id)),
+                        InlineKeyboardButton::callback("🚫 Remove", format!("set_remind:{}:none", task_id)),
                         InlineKeyboardButton::callback("↩️ Back", format!("cancel_delete:{}", task_id)),
                     ],
                 ]);
@@ -922,7 +1194,7 @@ pub async fn callback_handler(
                     bot.edit_message_text(
                         msg.chat().id,
                         msg.id(),
-                        format!("⏰ Set reminder for:\n\n📝 {}\n\n{}", task.title, reminder_str),
+                        format!("⏰ Set reminder for:\n\n📝 {}\n\n{}\n\n✍️ Custom: send text or 🎤 voice", task.title, reminder_str),
                     )
                     .reply_markup(remind_keyboard)
                     .await?;
@@ -937,6 +1209,33 @@ pub async fn callback_handler(
         if parts.len() == 2 {
             if let Ok(task_id) = parts[0].parse::<i64>() {
                 let option = parts[1];
+
+                // Handle custom reminder - set pending edit and ask for input
+                if option == "custom" {
+                    let telegram_id = q.from.id.0 as i64;
+                    if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
+                        context.set_pending_edit(user.id, PendingEdit::Reminder(task_id));
+                    }
+
+                    if let Some(task) = Task::find_by_id(&pool, task_id).await {
+                        if let Some(msg) = &q.message {
+                            let cancel_keyboard = InlineKeyboardMarkup::new(vec![vec![
+                                InlineKeyboardButton::callback("↩️ Cancel", format!("cancel_edit:{}", task_id)),
+                            ]]);
+
+                            bot.edit_message_text(
+                                msg.chat().id,
+                                msg.id(),
+                                format!("⏰ When to remind about:\n📝 {}\n\nSend time (text or 🎤 voice):\n• \"завтра в 15:00\"\n• \"через 2 часа\"\n• \"monday morning\"", task.title),
+                            )
+                            .reply_markup(cancel_keyboard)
+                            .await?;
+                        }
+                    }
+
+                    bot.answer_callback_query(q.id).text("Send reminder time").await?;
+                    return Ok(());
+                }
 
                 let (reminder_time, confirm_text) = match option {
                     "30" => {

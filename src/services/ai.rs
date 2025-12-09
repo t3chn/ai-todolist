@@ -221,6 +221,170 @@ Examples:
             .map_err(|e| format!("Parse JSON failed: {} - content: {}", e, json_str))
     }
 
+    /// Parse reminder time from natural language
+    pub async fn parse_reminder_time(&self, input: &str, current_date: &str) -> Result<String, String> {
+        let system_prompt = format!(
+            r#"You are a time parser. Extract a specific datetime from natural language input.
+
+Current date and time: {current_date}
+
+Return JSON only: {{"reminder_at": "YYYY-MM-DD HH:MM"}}
+
+Rules:
+- Parse relative times: "через 2 часа", "in 30 minutes", "завтра в 9", "tomorrow morning"
+- "morning" = 09:00, "evening" = 18:00, "night" = 21:00
+- Always return a specific datetime, never null
+- Use 24-hour format
+
+Examples:
+"через 2 часа" -> {{"reminder_at": "2024-01-15 17:00"}}
+"завтра в 9 утра" -> {{"reminder_at": "2024-01-16 09:00"}}
+"in 30 minutes" -> {{"reminder_at": "2024-01-15 15:30"}}
+"monday at 3pm" -> {{"reminder_at": "2024-01-20 15:00"}}"#
+        );
+
+        let request = ChatRequest {
+            model: "gpt-5-nano".to_string(),
+            messages: vec![
+                ChatMessage {
+                    role: "system".to_string(),
+                    content: system_prompt,
+                },
+                ChatMessage {
+                    role: "user".to_string(),
+                    content: input.to_string(),
+                },
+            ],
+            reasoning: None,
+        };
+
+        let response = self
+            .client
+            .post("https://api.openai.com/v1/chat/completions")
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| format!("Request failed: {}", e))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let text = response.text().await.unwrap_or_default();
+            return Err(format!("API error {}: {}", status, text));
+        }
+
+        let chat_response: ChatResponse = response
+            .json()
+            .await
+            .map_err(|e| format!("Parse response failed: {}", e))?;
+
+        let content = chat_response
+            .choices
+            .first()
+            .map(|c| c.message.content.clone())
+            .unwrap_or_default();
+
+        let json_str = content
+            .trim()
+            .trim_start_matches("```json")
+            .trim_start_matches("```")
+            .trim_end_matches("```")
+            .trim();
+
+        #[derive(Deserialize)]
+        struct ReminderResponse {
+            reminder_at: String,
+        }
+
+        let parsed: ReminderResponse = serde_json::from_str(json_str)
+            .map_err(|e| format!("Parse JSON failed: {} - content: {}", e, json_str))?;
+
+        Ok(parsed.reminder_at)
+    }
+
+    /// Parse timezone from city name
+    pub async fn parse_timezone(&self, input: &str) -> Result<String, String> {
+        let system_prompt = r#"You are a timezone parser. Given a city name or location, return the IANA timezone.
+
+Return JSON only: {"timezone": "America/New_York"}
+
+Common mappings:
+- Moscow, Москва -> Europe/Moscow
+- New York, NYC -> America/New_York
+- London -> Europe/London
+- Paris -> Europe/Paris
+- Berlin -> Europe/Berlin
+- Tokyo -> Asia/Tokyo
+- Dubai -> Asia/Dubai
+- Singapore -> Asia/Singapore
+- Sydney -> Australia/Sydney
+- Los Angeles, LA -> America/Los_Angeles
+- Chicago -> America/Chicago
+- Киев, Kyiv -> Europe/Kyiv
+- Минск, Minsk -> Europe/Minsk
+- Алматы, Almaty -> Asia/Almaty
+
+If unsure, make best guess based on the input."#;
+
+        let request = ChatRequest {
+            model: "gpt-5-nano".to_string(),
+            messages: vec![
+                ChatMessage {
+                    role: "system".to_string(),
+                    content: system_prompt.to_string(),
+                },
+                ChatMessage {
+                    role: "user".to_string(),
+                    content: input.to_string(),
+                },
+            ],
+            reasoning: None,
+        };
+
+        let response = self
+            .client
+            .post("https://api.openai.com/v1/chat/completions")
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| format!("Request failed: {}", e))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let text = response.text().await.unwrap_or_default();
+            return Err(format!("API error {}: {}", status, text));
+        }
+
+        let chat_response: ChatResponse = response
+            .json()
+            .await
+            .map_err(|e| format!("Parse response failed: {}", e))?;
+
+        let content = chat_response
+            .choices
+            .first()
+            .map(|c| c.message.content.clone())
+            .unwrap_or_default();
+
+        let json_str = content
+            .trim()
+            .trim_start_matches("```json")
+            .trim_start_matches("```")
+            .trim_end_matches("```")
+            .trim();
+
+        #[derive(Deserialize)]
+        struct TimezoneResponse {
+            timezone: String,
+        }
+
+        let parsed: TimezoneResponse = serde_json::from_str(json_str)
+            .map_err(|e| format!("Parse JSON failed: {} - content: {}", e, json_str))?;
+
+        Ok(parsed.timezone)
+    }
+
     /// Transcribe audio using Whisper API
     pub async fn transcribe_audio(&self, audio_data: Vec<u8>) -> Result<String, String> {
         let part = multipart::Part::bytes(audio_data)
