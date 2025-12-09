@@ -455,6 +455,57 @@ Just send me a task:
                                         format!("🎤 \"{}\"\n\n✉️ Draft for {}:\n\n{}\n\n💡 Copy and send!", transcript, recipient, draft),
                                     ).await;
                                 }
+                                Ok(ParsedInput::Command { action }) => {
+                                    // Delete progress message and handle command
+                                    let _ = bot.delete_message(msg.chat.id, progress_msg.id).await;
+
+                                    match action.as_str() {
+                                        "show_tasks" => {
+                                            let tasks = Task::find_pending_by_user(&pool, user.id).await.unwrap_or_default();
+                                            if tasks.is_empty() {
+                                                bot.send_message(msg.chat.id, "📋 No pending tasks!\n\n💡 Send a task like: \"Call mom tomorrow\"")
+                                                    .await?;
+                                            } else {
+                                                for task in tasks.iter().take(10) {
+                                                    let due_str = task.due_at.as_ref()
+                                                        .map(|d| format!("\n📅 {}", d))
+                                                        .unwrap_or_default();
+
+                                                    bot.send_message(
+                                                        msg.chat.id,
+                                                        format!("📝 {}{}", task.title, due_str),
+                                                    )
+                                                    .reply_markup(task_keyboard(task.id))
+                                                    .await?;
+                                                }
+                                            }
+                                        }
+                                        "show_today" => {
+                                            let tasks = Task::find_today_tasks(&pool, user.id).await.unwrap_or_default();
+                                            if tasks.is_empty() {
+                                                bot.send_message(msg.chat.id, "📅 No tasks for today!")
+                                                    .await?;
+                                            } else {
+                                                for task in tasks.iter() {
+                                                    let due_str = task.due_at.as_ref()
+                                                        .map(|d| format!("\n📅 {}", d))
+                                                        .unwrap_or_default();
+
+                                                    bot.send_message(
+                                                        msg.chat.id,
+                                                        format!("📝 {}{}", task.title, due_str),
+                                                    )
+                                                    .reply_markup(task_keyboard(task.id))
+                                                    .await?;
+                                                }
+                                            }
+                                        }
+                                        _ => {
+                                            bot.send_message(msg.chat.id, "🤖 Command recognized but not supported via voice yet")
+                                                .await?;
+                                        }
+                                    }
+                                }
                                 Ok(ParsedInput::Rejected { reason }) => {
                                     let _ = bot.edit_message_text(
                                         msg.chat.id,
@@ -721,6 +772,89 @@ Just send me a task:
                                 format!("✉️ Draft for {}:\n\n{}\n\n💡 Copy and send!", recipient, draft),
                             )
                             .await?;
+                        }
+                        Ok(ParsedInput::Command { action }) => {
+                            tracing::info!("AI command: {}", action);
+                            match action.as_str() {
+                                "show_tasks" => {
+                                    let tasks = Task::find_pending_by_user(&pool, user.id).await.unwrap_or_default();
+                                    if tasks.is_empty() {
+                                        bot.send_message(msg.chat.id, "📋 No pending tasks!\n\n💡 Send a task like: \"Call mom tomorrow\"")
+                                            .await?;
+                                    } else {
+                                        for task in tasks.iter().take(10) {
+                                            let due_str = task.due_at.as_ref()
+                                                .map(|d| format!("\n📅 {}", d))
+                                                .unwrap_or_default();
+                                            let reminder_str = task.reminder_at.as_ref()
+                                                .map(|r| format!("\n🔔 {}", r))
+                                                .unwrap_or_default();
+
+                                            bot.send_message(
+                                                msg.chat.id,
+                                                format!("📝 {}{}{}", task.title, due_str, reminder_str),
+                                            )
+                                            .reply_markup(task_keyboard(task.id))
+                                            .await?;
+                                        }
+                                        if tasks.len() > 10 {
+                                            bot.send_message(msg.chat.id, format!("...and {} more", tasks.len() - 10))
+                                                .await?;
+                                        }
+                                    }
+                                }
+                                "show_today" => {
+                                    let tasks = Task::find_today_tasks(&pool, user.id).await.unwrap_or_default();
+                                    if tasks.is_empty() {
+                                        bot.send_message(msg.chat.id, "📅 No tasks for today!\n\n💡 Add one: \"Meeting at 3pm\"")
+                                            .await?;
+                                    } else {
+                                        bot.send_message(msg.chat.id, format!("📅 Today ({} tasks):", tasks.len()))
+                                            .await?;
+                                        for task in tasks.iter() {
+                                            let due_str = task.due_at.as_ref()
+                                                .map(|d| format!("\n📅 {}", d))
+                                                .unwrap_or_default();
+
+                                            bot.send_message(
+                                                msg.chat.id,
+                                                format!("📝 {}{}", task.title, due_str),
+                                            )
+                                            .reply_markup(task_keyboard(task.id))
+                                            .await?;
+                                        }
+                                    }
+                                }
+                                "settings" => {
+                                    let settings_keyboard = InlineKeyboardMarkup::new(vec![
+                                        vec![
+                                            InlineKeyboardButton::callback("🌍 Timezone", "settings:timezone"),
+                                            InlineKeyboardButton::callback("🌅 Morning brief", "settings:brief"),
+                                        ],
+                                    ]);
+                                    bot.send_message(msg.chat.id, "⚙️ Settings")
+                                        .reply_markup(settings_keyboard)
+                                        .await?;
+                                }
+                                "help" => {
+                                    bot.send_message(
+                                        msg.chat.id,
+                                        "📋 <b>What I can do:</b>\n\n\
+                                        📝 Create tasks: \"Call mom tomorrow at 5pm\"\n\
+                                        🎤 Voice tasks: send voice message\n\
+                                        ✉️ Drafts: \"Draft message to boss\"\n\n\
+                                        <b>Commands:</b>\n\
+                                        • \"покажи задачи\" / \"show tasks\"\n\
+                                        • \"что на сегодня\" / \"today\"\n\
+                                        • \"настройки\" / \"settings\"",
+                                    )
+                                    .parse_mode(teloxide::types::ParseMode::Html)
+                                    .await?;
+                                }
+                                _ => {
+                                    bot.send_message(msg.chat.id, "🤖 Unknown command").await?;
+                                }
+                            }
                         }
                         Ok(ParsedInput::Rejected { reason }) => {
                             tracing::info!("AI rejected input: {}", reason);

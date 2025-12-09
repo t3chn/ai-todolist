@@ -50,6 +50,8 @@ pub enum ParsedInput {
     Task(ParsedTask),
     #[serde(rename = "draft")]
     Draft { recipient: String, context: String, draft: String },
+    #[serde(rename = "command")]
+    Command { action: String },
     #[serde(rename = "rejected")]
     Rejected { reason: String },
 }
@@ -143,46 +145,46 @@ Examples:
             .unwrap_or_default();
 
         let system_prompt = format!(
-            r#"You are a TASK MANAGEMENT bot. You ONLY handle tasks, reminders, and message drafts.
+            r#"You are a TASK MANAGEMENT bot. You handle tasks, reminders, message drafts, and task-related commands.
 
 Current date: {current_date}
 
 Classify the input into one of these intents:
-1. "task" - Creating a task/reminder/todo (actionable items the user needs to do)
+1. "task" - Creating a task/reminder/todo
 2. "draft" - Drafting a message to someone
-3. "rejected" - Everything else (questions, conversations, requests for information, etc.)
+3. "command" - Bot commands (show tasks, today's tasks, settings, help)
+4. "rejected" - Everything else
 
 Return JSON only, no markdown.
 
-For TASK intent (actionable items):
+For TASK intent:
 {{"intent": "task", "title": "task title", "due_at": "YYYY-MM-DD HH:MM" or null, "tags": ["tag1"]}}
 
-For DRAFT intent (writing messages):
+For DRAFT intent:
 {{"intent": "draft", "recipient": "who", "context": "about what", "draft": "the message"}}
 
-For REJECTED intent (anything that is NOT a task or draft):
+For COMMAND intent (user wants to see/manage their tasks):
+{{"intent": "command", "action": "show_tasks" or "show_today" or "settings" or "help"}}
+
+Command keywords:
+- show_tasks: "покажи задачи", "show tasks", "мои задачи", "my tasks", "list", "что делать", "what to do"
+- show_today: "на сегодня", "today", "что сегодня", "today's tasks"
+- settings: "настройки", "settings"
+- help: "помощь", "help", "что умеешь"
+
+For REJECTED intent:
 {{"intent": "rejected", "reason": "brief explanation in user's language"}}
 
-IMPORTANT - REJECT these types of input:
-- Questions about anything ("what is...", "how to...", "why...", "когда...", "что такое...")
-- Greetings ("hi", "hello", "привет")
-- Conversations, chat, small talk
-- Requests for information or explanations
-- Asking the bot to do something other than create tasks
-- General AI assistant requests
-
-ACCEPT as tasks:
-- Actions to do: "call mom", "buy groceries", "finish report"
-- Reminders: "remind me to...", "напомни..."
-- Todo items with or without deadlines
+REJECT: questions, greetings, conversations, info requests, off-topic.
 
 Examples:
 "call mom tomorrow" -> {{"intent": "task", "title": "Call mom", "due_at": "2024-01-02", "tags": ["personal"]}}
 "напиши сообщение боссу" -> {{"intent": "draft", "recipient": "boss", "context": "message", "draft": "..."}}
-"what is the weather?" -> {{"intent": "rejected", "reason": "I only manage tasks. Try: 'Check weather tomorrow'"}}
-"привет как дела" -> {{"intent": "rejected", "reason": "Привет! Я бот для задач. Напиши что нужно сделать."}}
-"explain quantum physics" -> {{"intent": "rejected", "reason": "I'm a task bot. Try: 'Study quantum physics'"}}
-"расскажи анекдот" -> {{"intent": "rejected", "reason": "Я только для задач. Попробуй: 'Найти хороший анекдот'"}}
+"покажи мои задачи" -> {{"intent": "command", "action": "show_tasks"}}
+"что на сегодня" -> {{"intent": "command", "action": "show_today"}}
+"show my tasks" -> {{"intent": "command", "action": "show_tasks"}}
+"what do I need to do" -> {{"intent": "command", "action": "show_tasks"}}
+"привет как дела" -> {{"intent": "rejected", "reason": "Привет! Напиши задачу или скажи 'покажи задачи'"}}
 {context_section}"#
         );
 
