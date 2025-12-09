@@ -500,8 +500,34 @@ Just send me a task:
                                                 }
                                             }
                                         }
+                                        "settings" => {
+                                            let settings_keyboard = InlineKeyboardMarkup::new(vec![
+                                                vec![
+                                                    InlineKeyboardButton::callback("🌍 Timezone", "settings:timezone"),
+                                                    InlineKeyboardButton::callback("🌅 Morning brief", "settings:brief"),
+                                                ],
+                                            ]);
+                                            bot.send_message(msg.chat.id, "⚙️ Settings")
+                                                .reply_markup(settings_keyboard)
+                                                .await?;
+                                        }
+                                        "help" => {
+                                            bot.send_message(
+                                                msg.chat.id,
+                                                "📋 <b>What I can do:</b>\n\n\
+                                                📝 Create tasks: \"Call mom tomorrow at 5pm\"\n\
+                                                🎤 Voice tasks: send voice message\n\
+                                                ✉️ Drafts: \"Draft message to boss\"\n\n\
+                                                <b>Commands:</b>\n\
+                                                • \"покажи задачи\" / \"show tasks\"\n\
+                                                • \"что на сегодня\" / \"today\"\n\
+                                                • \"настройки\" / \"settings\"",
+                                            )
+                                            .parse_mode(teloxide::types::ParseMode::Html)
+                                            .await?;
+                                        }
                                         _ => {
-                                            bot.send_message(msg.chat.id, "🤖 Command recognized but not supported via voice yet")
+                                            bot.send_message(msg.chat.id, "🤖 Unknown command")
                                                 .await?;
                                         }
                                     }
