@@ -284,21 +284,60 @@ Just send me a task:
                             if let Some(pending) = context.take_pending_edit(user.id) {
                                 match pending {
                                     PendingEdit::Title(task_id) => {
-                                        // Use transcript as new title
-                                        let _ = Task::update(&pool, task_id, Some(&transcript), None).await;
+                                        // Smart edit with AI - parse voice instruction
+                                        if let Some(task) = Task::find_by_id(&pool, task_id).await {
+                                            let current_date = Utc::now().format("%Y-%m-%d %H:%M").to_string();
 
-                                        if let Some(updated_task) = Task::find_by_id(&pool, task_id).await {
-                                            let due_str = updated_task.due_at.as_ref()
-                                                .map(|d| format!("\n📅 {}", d))
-                                                .unwrap_or_default();
+                                            match ai.parse_task_edit(&task.title, &transcript, &current_date).await {
+                                                Ok(parsed) => {
+                                                    // Show preview and ask for confirmation
+                                                    let proposed = ProposedEdit {
+                                                        task_id,
+                                                        old_title: task.title.clone(),
+                                                        new_title: parsed.title.clone(),
+                                                        new_due_at: parsed.due_at.clone(),
+                                                    };
 
-                                            bot.edit_message_text(
-                                                msg.chat.id,
-                                                progress_msg.id,
-                                                format!("🎤 \"{}\"\n\n✅ Title updated!\n\n📝 {}{}", transcript, updated_task.title, due_str),
-                                            )
-                                            .reply_markup(task_keyboard(task_id))
-                                            .await?;
+                                                    context.set_pending_edit(user.id, PendingEdit::ConfirmEdit(proposed.clone()));
+
+                                                    let due_change = match (&task.due_at, &parsed.due_at) {
+                                                        (Some(old), Some(new)) if old != new => format!("\n📅 {} → {}", old, new),
+                                                        (None, Some(new)) => format!("\n📅 → {}", new),
+                                                        (Some(old), None) => format!("\n📅 {} → ❌", old),
+                                                        _ => String::new(),
+                                                    };
+
+                                                    let confirm_keyboard = InlineKeyboardMarkup::new(vec![vec![
+                                                        InlineKeyboardButton::callback("✅ Apply", format!("confirm_edit:{}", task_id)),
+                                                        InlineKeyboardButton::callback("❌ Cancel", format!("cancel_edit:{}", task_id)),
+                                                    ]]);
+
+                                                    bot.edit_message_text(
+                                                        msg.chat.id,
+                                                        progress_msg.id,
+                                                        format!(
+                                                            "🎤 \"{}\"\n\n\
+                                                            📝 <b>Preview:</b>\n\n\
+                                                            <s>{}</s>\n\
+                                                            ↓\n\
+                                                            <b>{}</b>{}\n\n\
+                                                            Apply?",
+                                                            transcript, task.title, parsed.title, due_change
+                                                        ),
+                                                    )
+                                                    .parse_mode(teloxide::types::ParseMode::Html)
+                                                    .reply_markup(confirm_keyboard)
+                                                    .await?;
+                                                }
+                                                Err(e) => {
+                                                    tracing::warn!("Failed to parse voice edit: {}", e);
+                                                    let _ = bot.edit_message_text(
+                                                        msg.chat.id,
+                                                        progress_msg.id,
+                                                        format!("🎤 \"{}\"\n\n❌ Couldn't understand\n\n💡 Try: \"change time to 5pm\"", transcript),
+                                                    ).await;
+                                                }
+                                            }
                                         }
                                         return Ok(());
                                     }
@@ -510,8 +549,8 @@ Just send me a task:
 
                                             let due_change = match (&task.due_at, &parsed.due_at) {
                                                 (Some(old), Some(new)) if old != new => format!("\n📅 {} → {}", old, new),
-                                                (None, Some(new)) => format!("\n📅 (none) → {}", new),
-                                                (Some(old), None) => format!("\n📅 {} → (removed)", old),
+                                                (None, Some(new)) => format!("\n📅 → {}", new),
+                                                (Some(old), None) => format!("\n📅 {} → ❌", old),
                                                 _ => String::new(),
                                             };
 
@@ -523,10 +562,11 @@ Just send me a task:
                                             bot.send_message(
                                                 msg.chat.id,
                                                 format!(
-                                                    "📝 Preview changes:\n\n\
-                                                    <b>Before:</b> {}\n\
-                                                    <b>After:</b> {}{}\n\n\
-                                                    Apply these changes?",
+                                                    "📝 <b>Preview:</b>\n\n\
+                                                    <s>{}</s>\n\
+                                                    ↓\n\
+                                                    <b>{}</b>{}\n\n\
+                                                    Apply?",
                                                     task.title, parsed.title, due_change
                                                 ),
                                             )
