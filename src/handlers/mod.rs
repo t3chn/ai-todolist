@@ -1,5 +1,5 @@
 use crate::models::{Task, TaskStatus, User};
-use crate::services::{AiService, ConversationContext, ParsedInput, PendingEdit};
+use crate::services::{AiService, ConversationContext, ParsedInput, PendingEdit, ProposedEdit};
 use chrono::Utc;
 use sqlx::SqlitePool;
 use std::sync::Arc;
@@ -355,6 +355,15 @@ Just send me a task:
                                         }
                                         return Ok(());
                                     }
+                                    PendingEdit::ConfirmEdit(_) => {
+                                        // Voice during confirm - cancel
+                                        let _ = bot.edit_message_text(
+                                            msg.chat.id,
+                                            progress_msg.id,
+                                            "❌ Edit cancelled. Use the buttons to confirm or cancel.",
+                                        ).await;
+                                        return Ok(());
+                                    }
                                 }
                             }
 
@@ -405,6 +414,13 @@ Just send me a task:
                                         msg.chat.id,
                                         progress_msg.id,
                                         format!("🎤 \"{}\"\n\n✉️ Draft for {}:\n\n{}\n\n💡 Copy and send!", transcript, recipient, draft),
+                                    ).await;
+                                }
+                                Ok(ParsedInput::Rejected { reason }) => {
+                                    let _ = bot.edit_message_text(
+                                        msg.chat.id,
+                                        progress_msg.id,
+                                        format!("🎤 \"{}\"\n\n🤖 {}", transcript, reason),
                                     ).await;
                                 }
                                 Err(e) => {
@@ -473,31 +489,77 @@ Just send me a task:
                 if let Some(pending) = context.take_pending_edit(user.id) {
                     match pending {
                         PendingEdit::Title(task_id) => {
-                            if Task::find_by_id(&pool, task_id).await.is_some() {
-                                let _ = Task::update(&pool, task_id, Some(text), None).await;
+                            // Smart edit with AI - parse instruction and show preview
+                            if let Some(task) = Task::find_by_id(&pool, task_id).await {
+                                if let Some(ai) = &ai_service {
+                                    let _ = bot.send_chat_action(msg.chat.id, ChatAction::Typing).await;
+                                    let current_date = Utc::now().format("%Y-%m-%d %H:%M").to_string();
 
-                                // Reload task to get updated data
-                                if let Some(updated_task) = Task::find_by_id(&pool, task_id).await {
-                                    let due_str = updated_task.due_at.as_ref()
-                                        .map(|d| format!("\n📅 {}", d))
-                                        .unwrap_or_default();
+                                    match ai.parse_task_edit(&task.title, text, &current_date).await {
+                                        Ok(parsed) => {
+                                            // Show preview and ask for confirmation
+                                            let proposed = ProposedEdit {
+                                                task_id,
+                                                old_title: task.title.clone(),
+                                                new_title: parsed.title.clone(),
+                                                new_due_at: parsed.due_at.clone(),
+                                            };
 
-                                    bot.send_message(
-                                        msg.chat.id,
-                                        format!("✅ Title updated!\n\n📝 {}{}", updated_task.title, due_str),
-                                    )
-                                    .reply_markup(task_keyboard(task_id))
-                                    .await?;
+                                            // Store proposed edit for confirmation
+                                            context.set_pending_edit(user.id, PendingEdit::ConfirmEdit(proposed.clone()));
+
+                                            let due_change = match (&task.due_at, &parsed.due_at) {
+                                                (Some(old), Some(new)) if old != new => format!("\n📅 {} → {}", old, new),
+                                                (None, Some(new)) => format!("\n📅 (none) → {}", new),
+                                                (Some(old), None) => format!("\n📅 {} → (removed)", old),
+                                                _ => String::new(),
+                                            };
+
+                                            let confirm_keyboard = InlineKeyboardMarkup::new(vec![vec![
+                                                InlineKeyboardButton::callback("✅ Apply", format!("confirm_edit:{}", task_id)),
+                                                InlineKeyboardButton::callback("❌ Cancel", format!("cancel_edit:{}", task_id)),
+                                            ]]);
+
+                                            bot.send_message(
+                                                msg.chat.id,
+                                                format!(
+                                                    "📝 Preview changes:\n\n\
+                                                    <b>Before:</b> {}\n\
+                                                    <b>After:</b> {}{}\n\n\
+                                                    Apply these changes?",
+                                                    task.title, parsed.title, due_change
+                                                ),
+                                            )
+                                            .parse_mode(teloxide::types::ParseMode::Html)
+                                            .reply_markup(confirm_keyboard)
+                                            .await?;
+                                        }
+                                        Err(e) => {
+                                            tracing::warn!("Failed to parse edit: {}", e);
+                                            bot.send_message(
+                                                msg.chat.id,
+                                                "❌ Couldn't understand the edit instruction\n\n💡 Try: \"change time to 5pm\" or \"replace John with Mike\"",
+                                            )
+                                            .await?;
+                                        }
+                                    }
                                 } else {
-                                    bot.send_message(
-                                        msg.chat.id,
-                                        format!("✅ Updated: {}", text),
-                                    )
-                                    .await?;
+                                    // No AI - just replace title
+                                    let _ = Task::update(&pool, task_id, Some(text), None).await;
+                                    bot.send_message(msg.chat.id, format!("✅ Updated: {}", text)).await?;
                                 }
                             } else {
                                 bot.send_message(msg.chat.id, "❌ Task not found").await?;
                             }
+                            return Ok(());
+                        }
+                        PendingEdit::ConfirmEdit(_) => {
+                            // User sent text instead of clicking button - cancel
+                            bot.send_message(
+                                msg.chat.id,
+                                "❌ Edit cancelled. Use the buttons to confirm or cancel.",
+                            )
+                            .await?;
                             return Ok(());
                         }
                         PendingEdit::Reminder(task_id) => {
@@ -617,6 +679,14 @@ Just send me a task:
                             bot.send_message(
                                 msg.chat.id,
                                 format!("✉️ Draft for {}:\n\n{}\n\n💡 Copy and send!", recipient, draft),
+                            )
+                            .await?;
+                        }
+                        Ok(ParsedInput::Rejected { reason }) => {
+                            tracing::info!("AI rejected input: {}", reason);
+                            bot.send_message(
+                                msg.chat.id,
+                                format!("🤖 {}", reason),
                             )
                             .await?;
                         }
@@ -1064,6 +1134,35 @@ pub async fn callback_handler(
                 }
 
                 bot.answer_callback_query(q.id).text("Send new title").await?;
+            }
+        }
+    } else if let Some(task_id_str) = data.strip_prefix("confirm_edit:") {
+        // Apply confirmed edit
+        if let Ok(task_id) = task_id_str.parse::<i64>() {
+            let telegram_id = q.from.id.0 as i64;
+            if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
+                if let Some(PendingEdit::ConfirmEdit(proposed)) = context.take_pending_edit(user.id) {
+                    // Apply the changes
+                    let _ = Task::update(&pool, task_id, Some(&proposed.new_title), Some(proposed.new_due_at.as_deref())).await;
+
+                    if let Some(task) = Task::find_by_id(&pool, task_id).await {
+                        if let Some(msg) = &q.message {
+                            let due_str = task.due_at.as_ref()
+                                .map(|d| format!("\n📅 {}", d))
+                                .unwrap_or_default();
+
+                            bot.edit_message_text(
+                                msg.chat().id,
+                                msg.id(),
+                                format!("✅ Updated!\n\n📝 {}{}", task.title, due_str),
+                            )
+                            .reply_markup(task_keyboard(task_id))
+                            .await?;
+                        }
+                    }
+
+                    bot.answer_callback_query(q.id).text("✅ Changes applied").await?;
+                }
             }
         }
     } else if let Some(task_id_str) = data.strip_prefix("cancel_edit:") {

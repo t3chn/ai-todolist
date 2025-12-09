@@ -50,6 +50,8 @@ pub enum ParsedInput {
     Task(ParsedTask),
     #[serde(rename = "draft")]
     Draft { recipient: String, context: String, draft: String },
+    #[serde(rename = "rejected")]
+    Rejected { reason: String },
 }
 
 impl AiService {
@@ -134,38 +136,53 @@ Examples:
             .map_err(|e| format!("Parse JSON failed: {} - content: {}", e, json_str))
     }
 
-    /// Parse input with intent classification (task or draft)
+    /// Parse input with intent classification (task, draft, or rejected)
     pub async fn parse_input(&self, input: &str, current_date: &str, context: Option<&str>) -> Result<ParsedInput, String> {
         let context_section = context
             .map(|c| format!("\n\nRecent conversation:\n{}\n", c))
             .unwrap_or_default();
 
         let system_prompt = format!(
-            r#"You are an assistant that classifies user input and takes appropriate action.
+            r#"You are a TASK MANAGEMENT bot. You ONLY handle tasks, reminders, and message drafts.
 
 Current date: {current_date}
 
 Classify the input into one of these intents:
-1. "task" - Creating a task/reminder/todo
+1. "task" - Creating a task/reminder/todo (actionable items the user needs to do)
 2. "draft" - Drafting a message to someone
+3. "rejected" - Everything else (questions, conversations, requests for information, etc.)
 
 Return JSON only, no markdown.
 
-For TASK intent:
+For TASK intent (actionable items):
 {{"intent": "task", "title": "task title", "due_at": "YYYY-MM-DD HH:MM" or null, "tags": ["tag1"]}}
 
-For DRAFT intent (when user wants to write/draft/compose a message):
-{{"intent": "draft", "recipient": "who the message is for", "context": "what the message is about", "draft": "the actual drafted message"}}
+For DRAFT intent (writing messages):
+{{"intent": "draft", "recipient": "who", "context": "about what", "draft": "the message"}}
 
-Rules:
-- Keep the original language of the input
-- For drafts: write a professional, friendly message based on context
-- Look for keywords: "draft", "write", "compose", "message to", "напиши", "черновик"
+For REJECTED intent (anything that is NOT a task or draft):
+{{"intent": "rejected", "reason": "brief explanation in user's language"}}
+
+IMPORTANT - REJECT these types of input:
+- Questions about anything ("what is...", "how to...", "why...", "когда...", "что такое...")
+- Greetings ("hi", "hello", "привет")
+- Conversations, chat, small talk
+- Requests for information or explanations
+- Asking the bot to do something other than create tasks
+- General AI assistant requests
+
+ACCEPT as tasks:
+- Actions to do: "call mom", "buy groceries", "finish report"
+- Reminders: "remind me to...", "напомни..."
+- Todo items with or without deadlines
 
 Examples:
 "call mom tomorrow" -> {{"intent": "task", "title": "Call mom", "due_at": "2024-01-02", "tags": ["personal"]}}
-"draft a message to John about the meeting" -> {{"intent": "draft", "recipient": "John", "context": "meeting", "draft": "Hi John,\n\nI wanted to follow up about our meeting..."}}
-"напиши сообщение боссу что опаздываю" -> {{"intent": "draft", "recipient": "boss", "context": "running late", "draft": "Добрый день,\n\nПрошу прощения, но я немного задержусь..."}}
+"напиши сообщение боссу" -> {{"intent": "draft", "recipient": "boss", "context": "message", "draft": "..."}}
+"what is the weather?" -> {{"intent": "rejected", "reason": "I only manage tasks. Try: 'Check weather tomorrow'"}}
+"привет как дела" -> {{"intent": "rejected", "reason": "Привет! Я бот для задач. Напиши что нужно сделать."}}
+"explain quantum physics" -> {{"intent": "rejected", "reason": "I'm a task bot. Try: 'Study quantum physics'"}}
+"расскажи анекдот" -> {{"intent": "rejected", "reason": "Я только для задач. Попробуй: 'Найти хороший анекдот'"}}
 {context_section}"#
         );
 
@@ -425,5 +442,91 @@ If unsure, make best guess based on the input."#;
             .map_err(|e| format!("Parse Whisper response failed: {}", e))?;
 
         Ok(whisper_response.text)
+    }
+
+    /// Parse edit instruction and apply to existing task
+    pub async fn parse_task_edit(&self, current_title: &str, edit_instruction: &str, current_date: &str) -> Result<ParsedTask, String> {
+        let system_prompt = format!(
+            r#"You are a task editor. Given a current task and an edit instruction, produce the updated task.
+
+Current date: {current_date}
+
+Current task: "{current_title}"
+Edit instruction from user: "{edit_instruction}"
+
+Return JSON only: {{"title": "updated title", "due_at": "YYYY-MM-DD HH:MM" or null, "tags": []}}
+
+Rules:
+- Apply ONLY the changes requested in the edit instruction
+- Keep everything else from the original task unchanged
+- If user asks to change wording/phrasing, update the title accordingly
+- If user mentions a new time/date, update due_at
+- Keep the same language as the original task
+- Do NOT create a completely new task - modify the existing one
+
+Examples:
+Current: "Позвонить маме завтра"
+Edit: "измени на послезавтра"
+Result: {{"title": "Позвонить маме послезавтра", "due_at": "2024-01-17", "tags": []}}
+
+Current: "Buy groceries tomorrow at 5pm"
+Edit: "change to 3pm"
+Result: {{"title": "Buy groceries tomorrow at 3pm", "due_at": "2024-01-16 15:00", "tags": []}}
+
+Current: "Call John about project"
+Edit: "change John to Mike"
+Result: {{"title": "Call Mike about project", "due_at": null, "tags": []}}"#
+        );
+
+        let request = ChatRequest {
+            model: "gpt-5-nano".to_string(),
+            messages: vec![
+                ChatMessage {
+                    role: "system".to_string(),
+                    content: system_prompt,
+                },
+                ChatMessage {
+                    role: "user".to_string(),
+                    content: format!("Current: \"{}\"\nEdit: \"{}\"", current_title, edit_instruction),
+                },
+            ],
+            reasoning: None,
+        };
+
+        let response = self
+            .client
+            .post("https://api.openai.com/v1/chat/completions")
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| format!("Request failed: {}", e))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let text = response.text().await.unwrap_or_default();
+            return Err(format!("API error {}: {}", status, text));
+        }
+
+        let chat_response: ChatResponse = response
+            .json()
+            .await
+            .map_err(|e| format!("Parse response failed: {}", e))?;
+
+        let content = chat_response
+            .choices
+            .first()
+            .map(|c| c.message.content.clone())
+            .unwrap_or_default();
+
+        let json_str = content
+            .trim()
+            .trim_start_matches("```json")
+            .trim_start_matches("```")
+            .trim_end_matches("```")
+            .trim();
+
+        serde_json::from_str(json_str)
+            .map_err(|e| format!("Parse JSON failed: {} - content: {}", e, json_str))
     }
 }

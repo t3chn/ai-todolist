@@ -9,12 +9,22 @@ pub struct Message {
     pub content: String,
 }
 
+/// Proposed edit for confirmation
+#[derive(Debug, Clone)]
+pub struct ProposedEdit {
+    pub task_id: i64,
+    pub old_title: String,
+    pub new_title: String,
+    pub new_due_at: Option<String>,
+}
+
 /// Pending edit state for a user
 #[derive(Debug, Clone)]
 pub enum PendingEdit {
-    Title(i64),           // task_id - waiting for new title
-    Reminder(i64),        // task_id - waiting for custom reminder time
-    Timezone,             // waiting for city name for timezone
+    Title(i64),                    // task_id - waiting for edit instruction
+    ConfirmEdit(ProposedEdit),     // waiting for user confirmation
+    Reminder(i64),                 // task_id - waiting for custom reminder time
+    Timezone,                      // waiting for city name for timezone
 }
 
 pub struct ConversationContext {

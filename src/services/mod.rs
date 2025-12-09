@@ -4,4 +4,4 @@ pub mod morning_brief;
 pub mod reminder;
 
 pub use ai::{AiService, ParsedInput, ParsedTask};
-pub use context::{ConversationContext, PendingEdit};
+pub use context::{ConversationContext, PendingEdit, ProposedEdit};
