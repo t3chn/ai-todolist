@@ -53,6 +53,16 @@ pub enum Command {
     Today,
     #[command(description = "Settings")]
     Settings,
+    #[command(description = "Contact support")]
+    Support,
+}
+
+/// Get support chat ID from environment
+fn get_support_chat_id() -> Option<ChatId> {
+    std::env::var("SUPPORT_CHAT_ID")
+        .ok()
+        .and_then(|s| s.parse::<i64>().ok())
+        .map(ChatId)
 }
 
 fn task_keyboard(task_id: i64) -> InlineKeyboardMarkup {
@@ -211,6 +221,47 @@ pub async fn message_handler(
             }
         }
         return Ok(());
+    }
+
+    // Handle admin reply to support message
+    if let Some(support_chat) = get_support_chat_id() {
+        if msg.chat.id == support_chat {
+            if let Some(reply_to) = msg.reply_to_message() {
+                // Check if this is a reply to a support message
+                if let Some(reply_text) = reply_to.text() {
+                    // Extract chat_id from "chat:XXXXXXX" pattern
+                    if let Some(chat_id_str) = reply_text
+                        .split("chat:")
+                        .nth(1)
+                        .and_then(|s| s.split(|c: char| !c.is_ascii_digit() && c != '-').next())
+                    {
+                        if let Ok(user_chat_id) = chat_id_str.parse::<i64>() {
+                            // Forward admin's reply to user
+                            let admin_reply = format!(
+                                "📬 <b>Support Response</b>\n\n{}",
+                                text
+                            );
+
+                            match bot.send_message(ChatId(user_chat_id), &admin_reply)
+                                .parse_mode(teloxide::types::ParseMode::Html)
+                                .await
+                            {
+                                Ok(_) => {
+                                    bot.send_message(msg.chat.id, "✅ Reply sent to user")
+                                        .await?;
+                                }
+                                Err(e) => {
+                                    tracing::error!("Failed to send reply to user: {}", e);
+                                    bot.send_message(msg.chat.id, "❌ Failed to send reply")
+                                        .await?;
+                                }
+                            }
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+        }
     }
 
     if let Ok(cmd) = Command::parse(text, "") {
@@ -399,6 +450,77 @@ Just send me a task:
                         bot.send_message(msg.chat.id, "Please /start first")
                             .await?;
                     }
+                }
+            }
+            Command::Support => {
+                // /support <message> — send message to support
+                let support_text = text.strip_prefix("/support").map(|s| s.trim()).unwrap_or("");
+
+                if support_text.is_empty() {
+                    bot.send_message(
+                        msg.chat.id,
+                        "📨 <b>Contact Support</b>\n\n\
+                        Send your message with the command:\n\
+                        <code>/support your message here</code>\n\n\
+                        Example:\n\
+                        <code>/support Voice messages don't work</code>",
+                    )
+                    .parse_mode(teloxide::types::ParseMode::Html)
+                    .await?;
+                } else if let Some(support_chat) = get_support_chat_id() {
+                    // Get user info for the support message
+                    let user_info = if let Some(tg_user) = telegram_user {
+                        let username = tg_user.username.as_ref()
+                            .map(|u| format!(" @{}", u))
+                            .unwrap_or_default();
+                        format!("User #{}{} ({})", tg_user.id, username, tg_user.first_name)
+                    } else {
+                        format!("Chat #{}", msg.chat.id)
+                    };
+
+                    // Send to support chat (include chat_id for reply routing)
+                    let support_msg = format!(
+                        "📨 <b>[AI-Todolist Support]</b>\n\n\
+                        👤 {}\n\
+                        💬 {}\n\n\
+                        <i>Reply to respond • chat:{}</i>",
+                        user_info, support_text, msg.chat.id
+                    );
+
+                    match bot.send_message(support_chat, &support_msg)
+                        .parse_mode(teloxide::types::ParseMode::Html)
+                        .await
+                    {
+                        Ok(sent_msg) => {
+                            // Store mapping: support_msg_id -> user_chat_id
+                            // For now, include user chat ID in a hidden way for reply handling
+                            tracing::info!(
+                                "Support message from chat {} forwarded as msg {}",
+                                msg.chat.id, sent_msg.id
+                            );
+
+                            bot.send_message(
+                                msg.chat.id,
+                                "✅ Message sent to support!\n\nWe'll respond within 24 hours.",
+                            )
+                            .await?;
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to forward support message: {}", e);
+                            bot.send_message(
+                                msg.chat.id,
+                                "❌ Failed to send message. Please try again later.",
+                            )
+                            .await?;
+                        }
+                    }
+                } else {
+                    tracing::warn!("SUPPORT_CHAT_ID not configured");
+                    bot.send_message(
+                        msg.chat.id,
+                        "❌ Support is temporarily unavailable.\n\nPlease try again later.",
+                    )
+                    .await?;
                 }
             }
         }
