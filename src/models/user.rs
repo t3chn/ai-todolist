@@ -15,6 +15,11 @@ pub struct User {
     pub trial_ends_at: Option<String>,
     pub subscription_expires_at: Option<String>,
     pub subscription_type: Option<String>,
+    // Referral system
+    pub referral_code: Option<String>,
+    pub referred_by: Option<i64>,
+    pub referral_count: Option<i64>,
+    pub bonus_days: Option<i64>,
 }
 
 impl User {
@@ -168,5 +173,93 @@ impl User {
         .execute(pool)
         .await?;
         Ok(())
+    }
+
+    /// Generate and set referral code for user
+    pub async fn ensure_referral_code(pool: &SqlitePool, id: i64) -> Result<String, sqlx::Error> {
+        // Check if user already has a code
+        let existing: Option<String> = sqlx::query_scalar(
+            "SELECT referral_code FROM users WHERE id = ?"
+        )
+        .bind(id)
+        .fetch_optional(pool)
+        .await?
+        .flatten();
+
+        if let Some(code) = existing {
+            return Ok(code);
+        }
+
+        // Generate new code (base36 of user id + random suffix)
+        let code = format!("ref{:x}{:04x}", id, rand::random::<u16>());
+
+        sqlx::query(
+            "UPDATE users SET referral_code = ? WHERE id = ?"
+        )
+        .bind(&code)
+        .bind(id)
+        .execute(pool)
+        .await?;
+
+        Ok(code)
+    }
+
+    /// Find user by referral code
+    pub async fn find_by_referral_code(pool: &SqlitePool, code: &str) -> Option<Self> {
+        sqlx::query_as::<_, User>("SELECT * FROM users WHERE referral_code = ?")
+            .bind(code)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten()
+    }
+
+    /// Create user with referral
+    pub async fn create_with_referral(
+        pool: &SqlitePool,
+        telegram_id: i64,
+        username: Option<&str>,
+        first_name: Option<&str>,
+        referrer_id: i64,
+    ) -> Result<Self, sqlx::Error> {
+        // Create user with referral
+        let user = sqlx::query_as::<_, User>(
+            r#"
+            INSERT INTO users (telegram_id, username, first_name, trial_ends_at, subscription_type, referred_by)
+            VALUES (?, ?, ?, datetime('now', '+7 days'), 'trial', ?)
+            RETURNING *
+            "#,
+        )
+        .bind(telegram_id)
+        .bind(username)
+        .bind(first_name)
+        .bind(referrer_id)
+        .fetch_one(pool)
+        .await?;
+
+        // Increment referrer's count and add bonus days
+        sqlx::query(
+            r#"
+            UPDATE users
+            SET referral_count = COALESCE(referral_count, 0) + 1,
+                bonus_days = COALESCE(bonus_days, 0) + 7,
+                trial_ends_at = datetime(COALESCE(trial_ends_at, datetime('now')), '+7 days'),
+                updated_at = datetime('now')
+            WHERE id = ?
+            "#
+        )
+        .bind(referrer_id)
+        .execute(pool)
+        .await?;
+
+        Ok(user)
+    }
+
+    /// Get referral stats
+    pub fn referral_stats(&self) -> (i64, i64) {
+        (
+            self.referral_count.unwrap_or(0),
+            self.bonus_days.unwrap_or(0),
+        )
     }
 }

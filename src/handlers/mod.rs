@@ -55,7 +55,11 @@ pub enum Command {
     Settings,
     #[command(description = "Contact support")]
     Support,
+    #[command(description = "Invite friends & get bonus")]
+    Invite,
 }
+
+const BOT_USERNAME: &str = "aitodolist_bot";
 
 /// Get support chat ID from environment
 fn get_support_chat_id() -> Option<ChatId> {
@@ -268,13 +272,36 @@ pub async fn message_handler(
         match cmd {
             Command::Start => {
                 if let Some(tg_user) = telegram_user {
-                    let user = User::get_or_create(
-                        &pool,
-                        tg_user.id.0 as i64,
-                        tg_user.username.as_deref(),
-                        Some(&tg_user.first_name),
-                    )
-                    .await;
+                    // Check for referral deep link: /start ref...
+                    let referral_code = text.strip_prefix("/start ")
+                        .filter(|s| s.starts_with("ref"));
+
+                    let (user, is_new_referral) = if let Some(code) = referral_code {
+                        // Check if user already exists
+                        if let Some(existing) = User::find_by_telegram_id(&pool, tg_user.id.0 as i64).await {
+                            (Ok(existing), false)
+                        } else if let Some(referrer) = User::find_by_referral_code(&pool, code).await {
+                            // New user with valid referral
+                            let new_user = User::create_with_referral(
+                                &pool,
+                                tg_user.id.0 as i64,
+                                tg_user.username.as_deref(),
+                                Some(&tg_user.first_name),
+                                referrer.id,
+                            ).await;
+                            (new_user, true)
+                        } else {
+                            // Invalid referral code, create normally
+                            (User::create(&pool, tg_user.id.0 as i64, tg_user.username.as_deref(), Some(&tg_user.first_name)).await, false)
+                        }
+                    } else {
+                        (User::get_or_create(
+                            &pool,
+                            tg_user.id.0 as i64,
+                            tg_user.username.as_deref(),
+                            Some(&tg_user.first_name),
+                        ).await, false)
+                    };
 
                     let trial_info = if let Ok(ref u) = user {
                         if let Some(days) = u.trial_days_remaining() {
@@ -284,6 +311,12 @@ pub async fn message_handler(
                         }
                     } else {
                         String::new()
+                    };
+
+                    let referral_bonus = if is_new_referral {
+                        "\n\n🎉 <b>Referral bonus activated!</b>"
+                    } else {
+                        ""
                     };
 
                     let welcome_keyboard = InlineKeyboardMarkup::new(vec![
@@ -317,9 +350,9 @@ Just send me a task:
 ⏰ Smart reminders
 🎤 Voice input
 ✉️ Message drafts
-{}
+{}{}
 
-💡 <b>Tip:</b> Set your timezone for accurate reminders!", tg_user.first_name, trial_info),
+💡 <b>Tip:</b> Set your timezone for accurate reminders!", tg_user.first_name, trial_info, referral_bonus),
                     )
                     .parse_mode(teloxide::types::ParseMode::Html)
                     .reply_markup(welcome_keyboard)
@@ -531,6 +564,65 @@ Just send me a task:
                         "❌ Support is temporarily unavailable.\n\nPlease try again later.",
                     )
                     .await?;
+                }
+            }
+            Command::Invite => {
+                if let Some(tg_user) = telegram_user {
+                    if let Some(user) = User::find_by_telegram_id(&pool, tg_user.id.0 as i64).await {
+                        // Generate or get referral code
+                        match User::ensure_referral_code(&pool, user.id).await {
+                            Ok(code) => {
+                                let (referrals, bonus_days) = user.referral_stats();
+                                let invite_link = format!("https://t.me/{}?start={}", BOT_USERNAME, code);
+
+                                let share_text = format!(
+                                    "🚀 Try AI Todolist - smart task manager with voice input!\n\n{}",
+                                    invite_link
+                                );
+
+                                let share_keyboard = InlineKeyboardMarkup::new(vec![
+                                    vec![
+                                        InlineKeyboardButton::url(
+                                            "📤 Share",
+                                            format!("https://t.me/share/url?url={}&text=🚀%20Try%20AI%20Todolist!", invite_link).parse().unwrap(),
+                                        ),
+                                    ],
+                                ]);
+
+                                bot.send_message(
+                                    msg.chat.id,
+                                    format!(
+"🎁 <b>Invite Friends</b>
+
+Share your link and get <b>+7 days</b> for each friend who joins!
+
+━━━━━━━━━━━━━━━━━━━━
+🔗 <b>Your invite link:</b>
+<code>{}</code>
+
+━━━━━━━━━━━━━━━━━━━━
+📊 <b>Your stats:</b>
+
+👥 Friends invited: <b>{}</b>
+🎁 Bonus days earned: <b>{}</b>
+
+━━━━━━━━━━━━━━━━━━━━
+💡 Tap the link to copy, or use the Share button!", invite_link, referrals, bonus_days),
+                                )
+                                .parse_mode(teloxide::types::ParseMode::Html)
+                                .reply_markup(share_keyboard)
+                                .await?;
+                            }
+                            Err(e) => {
+                                tracing::error!("Failed to generate referral code: {}", e);
+                                bot.send_message(msg.chat.id, "❌ Failed to generate invite link")
+                                    .await?;
+                            }
+                        }
+                    } else {
+                        bot.send_message(msg.chat.id, "Please /start first")
+                            .await?;
+                    }
                 }
             }
         }

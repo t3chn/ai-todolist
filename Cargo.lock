@@ -17,6 +17,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "dotenvy",
+ "rand",
  "reqwest 0.12.24",
  "serde",
  "serde_json",

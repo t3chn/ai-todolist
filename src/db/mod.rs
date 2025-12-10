@@ -35,6 +35,14 @@ pub async fn init_pool(database_url: &str) -> Result<SqlitePool, sqlx::Error> {
         }
     }
 
+    // Run referrals migration
+    for stmt in include_str!("../../migrations/004_referrals.sql").split(';') {
+        let stmt = stmt.trim();
+        if !stmt.is_empty() {
+            let _ = sqlx::query(stmt).execute(&pool).await;
+        }
+    }
+
     tracing::info!("Database initialized");
     Ok(pool)
 }
