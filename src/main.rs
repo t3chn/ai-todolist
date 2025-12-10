@@ -47,7 +47,8 @@ async fn main() {
 
     let handler = dptree::entry()
         .branch(Update::filter_message().endpoint(handlers::message_handler))
-        .branch(Update::filter_callback_query().endpoint(handlers::callback_handler));
+        .branch(Update::filter_callback_query().endpoint(handlers::callback_handler))
+        .branch(Update::filter_pre_checkout_query().endpoint(handlers::pre_checkout_handler));
 
     // Start reminder service in background
     let reminder_bot = bot.clone();

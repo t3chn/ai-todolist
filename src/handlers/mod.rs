@@ -6,9 +6,14 @@ use std::sync::Arc;
 use teloxide::{
     net::Download,
     prelude::*,
-    types::{ChatAction, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, KeyboardMarkup, KeyboardRemove},
+    types::{ChatAction, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, KeyboardMarkup, KeyboardRemove, LabeledPrice, PreCheckoutQuery},
     utils::command::BotCommands,
 };
+
+// Subscription prices in Telegram Stars
+const PRICE_1_MONTH: i32 = 150;  // ~$3
+const PRICE_3_MONTHS: i32 = 400; // ~$8 (save ~$1)
+const PRICE_12_MONTHS: i32 = 1200; // ~$25 (save ~$11)
 
 /// Check subscription status and return appropriate message if expired
 fn check_subscription(user: &User) -> Option<String> {
@@ -17,8 +22,11 @@ fn check_subscription(user: &User) -> Option<String> {
     } else {
         Some(
             "⏰ Your trial has ended!\n\n\
-            To continue using AI Todolist, please subscribe.\n\n\
-            💡 Contact @your_support for subscription options.".to_string()
+            To continue using AI Todolist, subscribe:\n\n\
+            ⭐ 1 month — 150 Stars (~$3)\n\
+            ⭐ 3 months — 400 Stars (~$8)\n\
+            ⭐ 12 months — 1200 Stars (~$25)\n\n\
+            Use /settings → Subscribe".to_string()
         )
     }
 }
@@ -109,6 +117,54 @@ fn timezone_from_coords(lat: f64, lon: f64) -> String {
     format!("Etc/GMT{:+}", -offset_hours)
 }
 
+/// Send subscription invoice with Telegram Stars
+async fn send_subscription_invoice(
+    bot: &Bot,
+    chat_id: ChatId,
+    months: i32,
+    user_id: i64,
+) -> ResponseResult<Message> {
+    let (title, description, price, payload_months): (&str, &str, u32, &str) = match months {
+        1 => (
+            "AI Todolist — 1 Month",
+            "Full access to AI-powered task management for 1 month",
+            PRICE_1_MONTH as u32,
+            "1",
+        ),
+        3 => (
+            "AI Todolist — 3 Months",
+            "Full access to AI-powered task management for 3 months. Save ~$1!",
+            PRICE_3_MONTHS as u32,
+            "3",
+        ),
+        12 => (
+            "AI Todolist — 12 Months",
+            "Full access to AI-powered task management for 12 months. Save ~$11!",
+            PRICE_12_MONTHS as u32,
+            "12",
+        ),
+        _ => {
+            // Should not happen - invalid months value
+            tracing::error!("Invalid subscription months: {}", months);
+            return bot.send_message(chat_id, "❌ Invalid subscription option").await;
+        }
+    };
+
+    // payload format: "sub:{user_id}:{months}"
+    let payload = format!("sub:{}:{}", user_id, payload_months);
+
+    bot.send_invoice(
+        chat_id,
+        title,
+        description,
+        payload,
+        "", // Empty provider_token for Telegram Stars
+        "XTR", // Telegram Stars currency
+        vec![LabeledPrice::new("Subscription", price)],
+    )
+    .await
+}
+
 pub async fn message_handler(
     bot: Bot,
     msg: Message,
@@ -118,6 +174,44 @@ pub async fn message_handler(
 ) -> ResponseResult<()> {
     let text = msg.text().unwrap_or_default();
     let telegram_user = msg.from.as_ref();
+
+    // Handle successful payment
+    if let Some(payment) = msg.successful_payment() {
+        tracing::info!("Successful payment: {:?}", payment);
+
+        // Parse payload: "sub:{user_id}:{months}"
+        let parts: Vec<&str> = payment.invoice_payload.split(':').collect();
+        if parts.len() == 3 && parts[0] == "sub" {
+            if let (Ok(user_id), Ok(months)) = (parts[1].parse::<i64>(), parts[2].parse::<i64>()) {
+                // Activate subscription
+                if let Err(e) = User::activate_subscription(&pool, user_id, months).await {
+                    tracing::error!("Failed to activate subscription: {}", e);
+                    bot.send_message(msg.chat.id, "❌ Payment received but failed to activate subscription. Please contact support.")
+                        .await?;
+                } else {
+                    let months_text = match months {
+                        1 => "1 month",
+                        3 => "3 months",
+                        12 => "12 months",
+                        _ => "subscription",
+                    };
+                    bot.send_message(
+                        msg.chat.id,
+                        format!(
+                            "🎉 Thank you for subscribing!\n\n\
+                            ✅ Your {} subscription is now active.\n\n\
+                            Enjoy unlimited AI-powered task management!\n\n\
+                            💡 Send me a task to get started.",
+                            months_text
+                        ),
+                    )
+                    .await?;
+                    tracing::info!("Subscription activated for user {} for {} months", user_id, months);
+                }
+            }
+        }
+        return Ok(());
+    }
 
     if let Ok(cmd) = Command::parse(text, "") {
         match cmd {
@@ -254,22 +348,47 @@ Just send me a task:
             Command::Settings => {
                 if let Some(tg_user) = telegram_user {
                     if let Some(user) = User::find_by_telegram_id(&pool, tg_user.id.0 as i64).await {
-                        let settings_keyboard = InlineKeyboardMarkup::new(vec![
+                        // Subscription status
+                        let sub_status = if user.has_active_subscription() {
+                            if user.subscription_type.as_deref() == Some("trial") {
+                                let days = user.trial_days_remaining().unwrap_or(0);
+                                format!("🎁 Trial: {} days left", days)
+                            } else if let Some(expires) = &user.subscription_expires_at {
+                                format!("✅ Active until {}", expires.split(' ').next().unwrap_or(expires))
+                            } else {
+                                "✅ Active".to_string()
+                            }
+                        } else {
+                            "❌ Expired".to_string()
+                        };
+
+                        let mut keyboard_rows = vec![
                             vec![
                                 InlineKeyboardButton::callback("🌍 Change timezone", "settings:timezone"),
                             ],
                             vec![
                                 InlineKeyboardButton::callback("⏰ Change brief time", "settings:brief_time"),
                             ],
-                        ]);
+                        ];
+
+                        // Add subscribe button if not active or trial ending soon
+                        if !user.has_active_subscription() || user.trial_days_remaining().map(|d| d <= 2).unwrap_or(false) {
+                            keyboard_rows.push(vec![
+                                InlineKeyboardButton::callback("⭐ Subscribe", "subscribe"),
+                            ]);
+                        }
+
+                        let settings_keyboard = InlineKeyboardMarkup::new(keyboard_rows);
 
                         bot.send_message(
                             msg.chat.id,
                             format!(
                                 "⚙️ Settings\n\n\
+                                📊 Subscription: {}\n\
                                 🌍 Timezone: {}\n\
                                 ⏰ Morning brief: {}\n\n\
                                 Tap a button to change:",
+                                sub_status,
                                 user.timezone,
                                 user.morning_brief_time
                             ),
@@ -1700,6 +1819,89 @@ pub async fn callback_handler(
                 bot.answer_callback_query(q.id).text(format!("⏰ Reminder {}", confirm_text)).await?;
             }
         }
+    } else if data == "subscribe" {
+        // Show subscription options
+        let subscribe_keyboard = InlineKeyboardMarkup::new(vec![
+            vec![
+                InlineKeyboardButton::callback("⭐ 1 month — 150 Stars", "buy:1"),
+            ],
+            vec![
+                InlineKeyboardButton::callback("⭐ 3 months — 400 Stars (save $1)", "buy:3"),
+            ],
+            vec![
+                InlineKeyboardButton::callback("⭐ 12 months — 1200 Stars (save $11)", "buy:12"),
+            ],
+            vec![
+                InlineKeyboardButton::callback("↩️ Back", "settings:back"),
+            ],
+        ]);
+
+        if let Some(msg) = &q.message {
+            bot.edit_message_text(
+                msg.chat().id,
+                msg.id(),
+                "⭐ <b>Choose your plan</b>\n\n\
+                All plans include:\n\
+                • Unlimited AI task creation\n\
+                • Voice messages\n\
+                • Smart reminders\n\
+                • Message drafts\n\n\
+                Pay with Telegram Stars:",
+            )
+            .parse_mode(teloxide::types::ParseMode::Html)
+            .reply_markup(subscribe_keyboard)
+            .await?;
+        }
+
+        bot.answer_callback_query(q.id).await?;
+    } else if let Some(months_str) = data.strip_prefix("buy:") {
+        // Send invoice for selected plan
+        if let Ok(months) = months_str.parse::<i32>() {
+            let telegram_id = q.from.id.0 as i64;
+            if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
+                if let Some(msg) = &q.message {
+                    // Delete the menu message
+                    let _ = bot.delete_message(msg.chat().id, msg.id()).await;
+
+                    // Send invoice
+                    match send_subscription_invoice(&bot, msg.chat().id, months, user.id).await {
+                        Ok(_) => {
+                            tracing::info!("Invoice sent to user {} for {} months", user.id, months);
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to send invoice: {}", e);
+                            bot.send_message(msg.chat().id, "❌ Failed to create invoice. Please try again.")
+                                .await?;
+                        }
+                    }
+                }
+            }
+        }
+
+        bot.answer_callback_query(q.id).await?;
+    }
+
+    Ok(())
+}
+
+/// Handle pre-checkout query for Telegram Stars payments
+pub async fn pre_checkout_handler(
+    bot: Bot,
+    q: PreCheckoutQuery,
+) -> ResponseResult<()> {
+    // For Stars payments, we always approve
+    // In production, you might want to validate the payload
+    tracing::info!("Pre-checkout query: {:?}", q);
+
+    // Validate payload format
+    let parts: Vec<&str> = q.invoice_payload.split(':').collect();
+    if parts.len() == 3 && parts[0] == "sub" {
+        // Valid subscription payload
+        bot.answer_pre_checkout_query(q.id, true).await?;
+    } else {
+        bot.answer_pre_checkout_query(q.id, false)
+            .error_message("Invalid payment payload")
+            .await?;
     }
 
     Ok(())
