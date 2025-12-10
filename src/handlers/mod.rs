@@ -1,5 +1,5 @@
 use crate::models::{Task, TaskStatus, User};
-use crate::services::{AiService, ConversationContext, ParsedInput, PendingEdit, ProposedEdit};
+use crate::services::{AiService, ConversationContext, ParsedInput, PendingEdit, ProposedEdit, RateLimiter, RateLimits};
 use chrono::Utc;
 use sqlx::SqlitePool;
 use std::sync::Arc;
@@ -9,6 +9,28 @@ use teloxide::{
     types::{ChatAction, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, KeyboardMarkup, KeyboardRemove},
     utils::command::BotCommands,
 };
+
+/// Check subscription status and return appropriate message if expired
+fn check_subscription(user: &User) -> Option<String> {
+    if user.has_active_subscription() {
+        None
+    } else {
+        Some(
+            "⏰ Your trial has ended!\n\n\
+            To continue using AI Todolist, please subscribe.\n\n\
+            💡 Contact @your_support for subscription options.".to_string()
+        )
+    }
+}
+
+/// Get rate limits based on subscription status
+fn get_rate_limits(user: &User) -> RateLimits {
+    if user.subscription_type.as_deref() == Some("trial") {
+        RateLimits::trial()
+    } else {
+        RateLimits::paid()
+    }
+}
 
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase", description = "Available commands:")]
@@ -265,7 +287,30 @@ Just send me a task:
         // Voice message handling with progressive updates
         if let Some(tg_user) = telegram_user {
             if let Some(user) = User::find_by_telegram_id(&pool, tg_user.id.0 as i64).await {
+                // Check subscription
+                if let Some(expired_msg) = check_subscription(&user) {
+                    bot.send_message(msg.chat.id, expired_msg).await?;
+                    return Ok(());
+                }
+
+                // Check voice rate limit
+                let limits = get_rate_limits(&user);
+                if let Err(limit_msg) = RateLimiter::check_and_increment(
+                    &pool, user.id, "voice", limits.voice_per_day, 1440
+                ).await {
+                    bot.send_message(msg.chat.id, format!("⚠️ {}", limit_msg)).await?;
+                    return Ok(());
+                }
+
                 if let Some(ai) = &ai_service {
+                    // Check AI rate limit
+                    if let Err(limit_msg) = RateLimiter::check_and_increment(
+                        &pool, user.id, "ai_call", limits.ai_calls_per_hour, 60
+                    ).await {
+                        bot.send_message(msg.chat.id, format!("⚠️ {}", limit_msg)).await?;
+                        return Ok(());
+                    }
+
                     // Send initial processing message
                     let progress_msg = bot.send_message(msg.chat.id, "🎤 Processing voice...")
                         .await?;
@@ -420,6 +465,18 @@ Just send me a task:
 
                             match ai.parse_input(&transcript, &current_date, user_context.as_deref()).await {
                                 Ok(ParsedInput::Task(parsed)) => {
+                                    // Check task creation rate limit
+                                    if let Err(limit_msg) = RateLimiter::check_and_increment(
+                                        &pool, user.id, "task", limits.tasks_per_day, 1440
+                                    ).await {
+                                        let _ = bot.edit_message_text(
+                                            msg.chat.id,
+                                            progress_msg.id,
+                                            format!("⚠️ {}", limit_msg),
+                                        ).await;
+                                        return Ok(());
+                                    }
+
                                     match Task::create(&pool, user.id, &parsed.title, None, parsed.due_at.as_deref()).await {
                                         Ok(task) => {
                                             if task.due_at.is_some() {
@@ -541,6 +598,18 @@ Just send me a task:
                                 }
                                 Err(e) => {
                                     tracing::warn!("AI parse failed: {}, using transcript as task", e);
+                                    // Check task creation rate limit
+                                    if let Err(limit_msg) = RateLimiter::check_and_increment(
+                                        &pool, user.id, "task", limits.tasks_per_day, 1440
+                                    ).await {
+                                        let _ = bot.edit_message_text(
+                                            msg.chat.id,
+                                            progress_msg.id,
+                                            format!("⚠️ {}", limit_msg),
+                                        ).await;
+                                        return Ok(());
+                                    }
+
                                     match Task::create(&pool, user.id, &transcript, None, None).await {
                                         Ok(task) => {
                                             bot.edit_message_text(
@@ -749,6 +818,21 @@ Just send me a task:
 
                 // Natural language input
                 if let Some(ai) = &ai_service {
+                    // Check subscription
+                    if let Some(expired_msg) = check_subscription(&user) {
+                        bot.send_message(msg.chat.id, expired_msg).await?;
+                        return Ok(());
+                    }
+
+                    // Check rate limit
+                    let limits = get_rate_limits(&user);
+                    if let Err(limit_msg) = RateLimiter::check_and_increment(
+                        &pool, user.id, "ai_call", limits.ai_calls_per_hour, 60
+                    ).await {
+                        bot.send_message(msg.chat.id, format!("⚠️ {}", limit_msg)).await?;
+                        return Ok(());
+                    }
+
                     // Show typing indicator while AI processes
                     let _ = bot.send_chat_action(msg.chat.id, ChatAction::Typing).await;
 
@@ -761,6 +845,14 @@ Just send me a task:
                     match ai.parse_input(text, &current_date, user_context.as_deref()).await {
                         Ok(ParsedInput::Task(parsed)) => {
                             tracing::info!("AI parsed task: {:?}", parsed);
+                            // Check task creation rate limit
+                            if let Err(limit_msg) = RateLimiter::check_and_increment(
+                                &pool, user.id, "task", limits.tasks_per_day, 1440
+                            ).await {
+                                bot.send_message(msg.chat.id, format!("⚠️ {}", limit_msg)).await?;
+                                return Ok(());
+                            }
+
                             match Task::create(&pool, user.id, &parsed.title, None, parsed.due_at.as_deref()).await {
                                 Ok(task) => {
                                     if task.due_at.is_some() {
@@ -892,6 +984,14 @@ Just send me a task:
                         }
                         Err(e) => {
                             tracing::warn!("AI parse failed: {}, creating task with raw text", e);
+                            // Check task creation rate limit
+                            if let Err(limit_msg) = RateLimiter::check_and_increment(
+                                &pool, user.id, "task", limits.tasks_per_day, 1440
+                            ).await {
+                                bot.send_message(msg.chat.id, format!("⚠️ {}", limit_msg)).await?;
+                                return Ok(());
+                            }
+
                             match Task::create(&pool, user.id, text, None, None).await {
                                 Ok(task) => {
                                     bot.send_message(
@@ -911,6 +1011,21 @@ Just send me a task:
                     }
                 } else {
                     // No AI service, create raw task
+                    // Check subscription
+                    if let Some(expired_msg) = check_subscription(&user) {
+                        bot.send_message(msg.chat.id, expired_msg).await?;
+                        return Ok(());
+                    }
+
+                    // Check task creation rate limit
+                    let limits = get_rate_limits(&user);
+                    if let Err(limit_msg) = RateLimiter::check_and_increment(
+                        &pool, user.id, "task", limits.tasks_per_day, 1440
+                    ).await {
+                        bot.send_message(msg.chat.id, format!("⚠️ {}", limit_msg)).await?;
+                        return Ok(());
+                    }
+
                     match Task::create(&pool, user.id, text, None, None).await {
                         Ok(task) => {
                             bot.send_message(
