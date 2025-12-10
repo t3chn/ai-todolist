@@ -453,19 +453,29 @@ Just send me a task:
                 }
             }
             Command::Support => {
-                // /support <message> — send message to support
+                // /support [message] — send message to support
                 let support_text = text.strip_prefix("/support").map(|s| s.trim()).unwrap_or("");
 
                 if support_text.is_empty() {
+                    // Set pending state and ask for message
+                    if let Some(tg_user) = telegram_user {
+                        if let Some(user) = User::find_by_telegram_id(&pool, tg_user.id.0 as i64).await {
+                            context.set_pending_edit(user.id, PendingEdit::Support);
+                        }
+                    }
+
+                    let cancel_keyboard = InlineKeyboardMarkup::new(vec![vec![
+                        InlineKeyboardButton::callback("❌ Cancel", "cancel_support"),
+                    ]]);
+
                     bot.send_message(
                         msg.chat.id,
                         "📨 <b>Contact Support</b>\n\n\
-                        Send your message with the command:\n\
-                        <code>/support your message here</code>\n\n\
-                        Example:\n\
-                        <code>/support Voice messages don't work</code>",
+                        Describe your issue or question.\n\
+                        Send your message now:",
                     )
                     .parse_mode(teloxide::types::ParseMode::Html)
+                    .reply_markup(cancel_keyboard)
                     .await?;
                 } else if let Some(support_chat) = get_support_chat_id() {
                     // Get user info for the support message
@@ -687,6 +697,56 @@ Just send me a task:
                                             progress_msg.id,
                                             "❌ Edit cancelled. Use the buttons to confirm or cancel.",
                                         ).await;
+                                        return Ok(());
+                                    }
+                                    PendingEdit::Support => {
+                                        // Voice support message
+                                        if let Some(support_chat) = get_support_chat_id() {
+                                            let user_info = if let Some(tg_user) = telegram_user {
+                                                let username = tg_user.username.as_ref()
+                                                    .map(|u| format!(" @{}", u))
+                                                    .unwrap_or_default();
+                                                format!("User #{}{} ({})", tg_user.id, username, tg_user.first_name)
+                                            } else {
+                                                format!("Chat #{}", msg.chat.id)
+                                            };
+
+                                            let support_msg = format!(
+                                                "📨 <b>[AI-Todolist Support]</b>\n\n\
+                                                👤 {}\n\
+                                                🎤 {}\n\n\
+                                                <i>Reply to respond • chat:{}</i>",
+                                                user_info, transcript, msg.chat.id
+                                            );
+
+                                            match bot.send_message(support_chat, &support_msg)
+                                                .parse_mode(teloxide::types::ParseMode::Html)
+                                                .await
+                                            {
+                                                Ok(_) => {
+                                                    bot.edit_message_text(
+                                                        msg.chat.id,
+                                                        progress_msg.id,
+                                                        format!("🎤 \"{}\"\n\n✅ Message sent to support!", transcript),
+                                                    )
+                                                    .await?;
+                                                }
+                                                Err(e) => {
+                                                    tracing::error!("Failed to forward voice support: {}", e);
+                                                    let _ = bot.edit_message_text(
+                                                        msg.chat.id,
+                                                        progress_msg.id,
+                                                        "❌ Failed to send message. Please try again.",
+                                                    ).await;
+                                                }
+                                            }
+                                        } else {
+                                            let _ = bot.edit_message_text(
+                                                msg.chat.id,
+                                                progress_msg.id,
+                                                "❌ Support is temporarily unavailable.",
+                                            ).await;
+                                        }
                                         return Ok(());
                                     }
                                 }
@@ -1051,6 +1111,55 @@ Just send me a task:
                             } else {
                                 bot.send_message(msg.chat.id, "❌ AI service required")
                                     .await?;
+                            }
+                            return Ok(());
+                        }
+                        PendingEdit::Support => {
+                            // Send support message
+                            if let Some(support_chat) = get_support_chat_id() {
+                                let user_info = if let Some(tg_user) = telegram_user {
+                                    let username = tg_user.username.as_ref()
+                                        .map(|u| format!(" @{}", u))
+                                        .unwrap_or_default();
+                                    format!("User #{}{} ({})", tg_user.id, username, tg_user.first_name)
+                                } else {
+                                    format!("Chat #{}", msg.chat.id)
+                                };
+
+                                let support_msg = format!(
+                                    "📨 <b>[AI-Todolist Support]</b>\n\n\
+                                    👤 {}\n\
+                                    💬 {}\n\n\
+                                    <i>Reply to respond • chat:{}</i>",
+                                    user_info, text, msg.chat.id
+                                );
+
+                                match bot.send_message(support_chat, &support_msg)
+                                    .parse_mode(teloxide::types::ParseMode::Html)
+                                    .await
+                                {
+                                    Ok(_) => {
+                                        bot.send_message(
+                                            msg.chat.id,
+                                            "✅ Message sent to support!\n\nWe'll respond within 24 hours.",
+                                        )
+                                        .await?;
+                                    }
+                                    Err(e) => {
+                                        tracing::error!("Failed to forward support message: {}", e);
+                                        bot.send_message(
+                                            msg.chat.id,
+                                            "❌ Failed to send message. Please try again later.",
+                                        )
+                                        .await?;
+                                    }
+                                }
+                            } else {
+                                bot.send_message(
+                                    msg.chat.id,
+                                    "❌ Support is temporarily unavailable.",
+                                )
+                                .await?;
                             }
                             return Ok(());
                         }
@@ -1721,6 +1830,23 @@ pub async fn callback_handler(
                 }
             }
         }
+    } else if data == "cancel_support" {
+        // Cancel support message
+        let telegram_id = q.from.id.0 as i64;
+        if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
+            let _ = context.take_pending_edit(user.id);
+        }
+
+        if let Some(msg) = &q.message {
+            bot.edit_message_text(
+                msg.chat().id,
+                msg.id(),
+                "❌ Support request cancelled.",
+            )
+            .await?;
+        }
+
+        bot.answer_callback_query(q.id).await?;
     } else if let Some(task_id_str) = data.strip_prefix("cancel_edit:") {
         // Cancel pending edit and restore task view
         if let Ok(task_id) = task_id_str.parse::<i64>() {

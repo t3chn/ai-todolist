@@ -25,6 +25,7 @@ pub enum PendingEdit {
     ConfirmEdit(ProposedEdit),     // waiting for user confirmation
     Reminder(i64),                 // task_id - waiting for custom reminder time
     Timezone,                      // waiting for city name for timezone
+    Support,                       // waiting for support message
 }
 
 pub struct ConversationContext {
