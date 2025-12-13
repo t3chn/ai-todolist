@@ -1,0 +1,38 @@
+name: AI Todolist Bot
+stage: published
+priority: p1
+category: timequity
+description: "Telegram bot - AI-powered todolist with voice input, smart reminders, morning briefs"
+
+links:
+  repo: ""
+  store: ""
+  landing: ""
+  bot: "t.me/..."
+
+metrics:
+  users: 0
+  mrr: 0
+  trials: 0
+
+dates:
+  created: "2025-12-01"
+  published: "2025-12-10"
+  last_updated: "2025-12-13"
+
+stack:
+  - rust
+  - teloxide
+  - sqlite
+  - openai
+
+tags:
+  - telegram-bot
+  - ai
+  - productivity
+  - saas
+
+monetization:
+  model: subscription
+  trial: 7 days
+  price: TBD

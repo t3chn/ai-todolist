@@ -20,6 +20,11 @@ pub struct User {
     pub referred_by: Option<i64>,
     pub referral_count: Option<i64>,
     pub bonus_days: Option<i64>,
+    // Admin
+    pub is_banned: Option<i64>,
+    pub banned_at: Option<String>,
+    pub ban_reason: Option<String>,
+    pub last_active_at: Option<String>,
 }
 
 impl User {
@@ -124,18 +129,52 @@ impl User {
         false
     }
 
-    /// Get days remaining in trial
+    /// Get days remaining in trial (ceiling - partial day counts as full)
     pub fn trial_days_remaining(&self) -> Option<i64> {
         let now = Utc::now();
         if let Some(trial_ends) = &self.trial_ends_at {
             if let Ok(exp) = chrono::NaiveDateTime::parse_from_str(trial_ends, "%Y-%m-%d %H:%M:%S") {
-                let days = (exp.and_utc() - now).num_days();
-                if days >= 0 {
+                let duration = exp.and_utc() - now;
+                if duration.num_seconds() > 0 {
+                    // Ceiling: any partial day counts as 1 day
+                    let days = (duration.num_seconds() + 86399) / 86400;
                     return Some(days);
                 }
             }
         }
         None
+    }
+
+    /// Get days remaining in subscription (ceiling)
+    pub fn subscription_days_remaining(&self) -> Option<i64> {
+        let now = Utc::now();
+        if let Some(expires) = &self.subscription_expires_at {
+            if let Ok(exp) = chrono::NaiveDateTime::parse_from_str(expires, "%Y-%m-%d %H:%M:%S") {
+                let duration = exp.and_utc() - now;
+                if duration.num_seconds() > 0 {
+                    let days = (duration.num_seconds() + 86399) / 86400;
+                    return Some(days);
+                }
+            }
+        }
+        None
+    }
+
+    /// Get human-readable subscription status
+    pub fn subscription_status(&self) -> String {
+        // Check paid subscription first
+        if let Some(days) = self.subscription_days_remaining() {
+            return format!("✅ Active ({} days)", days);
+        }
+        // Check trial
+        if let Some(days) = self.trial_days_remaining() {
+            if days <= 2 {
+                return format!("⚠️ Trial ends in {} day{}", days, if days == 1 { "" } else { "s" });
+            }
+            return format!("🎁 Trial ({} days)", days);
+        }
+        // Expired
+        "❌ Expired".to_string()
     }
 
     /// Activate subscription
@@ -262,4 +301,198 @@ impl User {
             self.bonus_days.unwrap_or(0),
         )
     }
+
+    // ============ Admin Methods ============
+
+    /// Check if user is banned
+    pub fn is_banned(&self) -> bool {
+        self.is_banned.unwrap_or(0) == 1
+    }
+
+    /// Ban user
+    pub async fn ban(pool: &SqlitePool, user_id: i64, reason: Option<&str>) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "UPDATE users SET is_banned = 1, banned_at = datetime('now'), ban_reason = ? WHERE id = ?"
+        )
+        .bind(reason)
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Unban user
+    pub async fn unban(pool: &SqlitePool, user_id: i64) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "UPDATE users SET is_banned = 0, banned_at = NULL, ban_reason = NULL WHERE id = ?"
+        )
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Grant subscription for N days
+    pub async fn grant_subscription(pool: &SqlitePool, user_id: i64, days: i64) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            UPDATE users SET
+                subscription_expires_at = datetime(
+                    COALESCE(
+                        CASE WHEN subscription_expires_at > datetime('now') THEN subscription_expires_at ELSE NULL END,
+                        datetime('now')
+                    ),
+                    ? || ' days'
+                ),
+                subscription_type = 'paid',
+                updated_at = datetime('now')
+            WHERE id = ?
+            "#
+        )
+        .bind(format!("+{}", days))
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Update last active timestamp
+    pub async fn touch_last_active(pool: &SqlitePool, telegram_id: i64) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE users SET last_active_at = datetime('now') WHERE telegram_id = ?")
+            .bind(telegram_id)
+            .execute(pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Get all users with pagination
+    pub async fn list_all(pool: &SqlitePool, limit: i64, offset: i64) -> Result<Vec<Self>, sqlx::Error> {
+        sqlx::query_as::<_, User>(
+            "SELECT * FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        )
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(pool)
+        .await
+    }
+
+    /// Search users by username or telegram_id
+    pub async fn search(pool: &SqlitePool, query: &str) -> Result<Vec<Self>, sqlx::Error> {
+        let query_pattern = format!("%{}%", query);
+        sqlx::query_as::<_, User>(
+            "SELECT * FROM users WHERE username LIKE ? OR CAST(telegram_id AS TEXT) LIKE ? OR first_name LIKE ? LIMIT 20"
+        )
+        .bind(&query_pattern)
+        .bind(&query_pattern)
+        .bind(&query_pattern)
+        .fetch_all(pool)
+        .await
+    }
+
+    /// Get banned users
+    pub async fn list_banned(pool: &SqlitePool) -> Result<Vec<Self>, sqlx::Error> {
+        sqlx::query_as::<_, User>("SELECT * FROM users WHERE is_banned = 1 ORDER BY banned_at DESC")
+            .fetch_all(pool)
+            .await
+    }
+
+    /// Get stats for admin dashboard
+    pub async fn admin_stats(pool: &SqlitePool) -> Result<AdminStats, sqlx::Error> {
+        let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+            .fetch_one(pool)
+            .await?;
+
+        let trial: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM users WHERE subscription_type = 'trial' AND trial_ends_at > datetime('now')"
+        )
+            .fetch_one(pool)
+            .await?;
+
+        let paid: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM users WHERE subscription_type = 'paid' AND subscription_expires_at > datetime('now')"
+        )
+            .fetch_one(pool)
+            .await?;
+
+        let expired: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM users WHERE (subscription_type = 'trial' AND trial_ends_at <= datetime('now')) OR (subscription_type = 'paid' AND subscription_expires_at <= datetime('now'))"
+        )
+            .fetch_one(pool)
+            .await?;
+
+        let banned: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE is_banned = 1")
+            .fetch_one(pool)
+            .await?;
+
+        let active_7d: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM users WHERE last_active_at > datetime('now', '-7 days')"
+        )
+            .fetch_one(pool)
+            .await?;
+
+        let active_30d: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM users WHERE last_active_at > datetime('now', '-30 days')"
+        )
+            .fetch_one(pool)
+            .await?;
+
+        let new_today: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM users WHERE created_at > datetime('now', '-1 day')"
+        )
+            .fetch_one(pool)
+            .await?;
+
+        let new_week: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM users WHERE created_at > datetime('now', '-7 days')"
+        )
+            .fetch_one(pool)
+            .await?;
+
+        Ok(AdminStats {
+            total,
+            trial,
+            paid,
+            expired,
+            banned,
+            active_7d,
+            active_30d,
+            new_today,
+            new_week,
+        })
+    }
+
+    /// Get users by subscription segment
+    pub async fn list_by_segment(pool: &SqlitePool, segment: &str) -> Result<Vec<Self>, sqlx::Error> {
+        let query = match segment {
+            "trial" => "SELECT * FROM users WHERE subscription_type = 'trial' AND trial_ends_at > datetime('now') AND (is_banned IS NULL OR is_banned = 0)",
+            "paid" => "SELECT * FROM users WHERE subscription_type = 'paid' AND subscription_expires_at > datetime('now') AND (is_banned IS NULL OR is_banned = 0)",
+            "expired" => "SELECT * FROM users WHERE ((subscription_type = 'trial' AND trial_ends_at <= datetime('now')) OR (subscription_type = 'paid' AND subscription_expires_at <= datetime('now'))) AND (is_banned IS NULL OR is_banned = 0)",
+            "all" | _ => "SELECT * FROM users WHERE is_banned IS NULL OR is_banned = 0",
+        };
+        sqlx::query_as::<_, User>(query).fetch_all(pool).await
+    }
+
+    /// Display name for admin UI
+    pub fn display_name(&self) -> String {
+        if let Some(username) = &self.username {
+            format!("@{}", username)
+        } else if let Some(name) = &self.first_name {
+            name.clone()
+        } else {
+            format!("User {}", self.telegram_id)
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct AdminStats {
+    pub total: i64,
+    pub trial: i64,
+    pub paid: i64,
+    pub expired: i64,
+    pub banned: i64,
+    pub active_7d: i64,
+    pub active_30d: i64,
+    pub new_today: i64,
+    pub new_week: i64,
 }

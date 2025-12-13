@@ -1,5 +1,15 @@
 # AI Todolist Bot
 
+## ВАЖНО: Workflow
+
+**ВСЕГДА используй beads для трекинга задач!**
+- `bd create --title="..." --type=task` — создать задачу
+- `bd update <id> --status=in_progress` — взять в работу
+- `bd close <id>` — закрыть
+- НЕ используй TodoWrite — только beads
+
+---
+
 Telegram бот — AI-powered todolist который не просто напоминает, а помогает выполнять задачи.
 
 ## Features (MVP Complete)

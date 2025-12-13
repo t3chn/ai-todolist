@@ -220,6 +220,14 @@ impl Task {
         .unwrap_or(0)
     }
 
+    /// Count all tasks for a user
+    pub async fn count_by_user(pool: &SqlitePool, user_id: i64) -> Result<i64, sqlx::Error> {
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM tasks WHERE user_id = ?")
+            .bind(user_id)
+            .fetch_one(pool)
+            .await
+    }
+
     /// Update task title and/or due_at
     pub async fn update(
         pool: &SqlitePool,

@@ -26,6 +26,10 @@ pub enum PendingEdit {
     Reminder(i64),                 // task_id - waiting for custom reminder time
     Timezone,                      // waiting for city name for timezone
     Support,                       // waiting for support message
+    // Admin
+    AdminSearch,                   // waiting for user search query
+    AdminBroadcast(String),        // segment - waiting for broadcast message
+    AdminMessage(i64),             // user_id - waiting for message to send
 }
 
 pub struct ConversationContext {

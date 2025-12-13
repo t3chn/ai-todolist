@@ -57,9 +57,19 @@ pub enum Command {
     Support,
     #[command(description = "Invite friends & get bonus")]
     Invite,
+    #[command(description = "Admin panel", hide)]
+    Admin,
 }
 
 const BOT_USERNAME: &str = "aitodolist_bot";
+
+/// Check if user is admin
+fn is_admin(telegram_id: i64) -> bool {
+    std::env::var("ADMIN_IDS")
+        .unwrap_or_default()
+        .split(',')
+        .any(|id| id.trim().parse::<i64>().ok() == Some(telegram_id))
+}
 
 /// Get support chat ID from environment
 fn get_support_chat_id() -> Option<ChatId> {
@@ -305,7 +315,7 @@ pub async fn message_handler(
 
                     let trial_info = if let Ok(ref u) = user {
                         if let Some(days) = u.trial_days_remaining() {
-                            format!("\n\n🎁 Trial: {} days remaining", days)
+                            format!("✨ {} days free", days)
                         } else {
                             String::new()
                         }
@@ -314,45 +324,29 @@ pub async fn message_handler(
                     };
 
                     let referral_bonus = if is_new_referral {
-                        "\n\n🎉 <b>Referral bonus activated!</b>"
+                        " · +7 bonus!"
                     } else {
                         ""
                     };
 
                     let welcome_keyboard = InlineKeyboardMarkup::new(vec![
                         vec![
-                            InlineKeyboardButton::callback("📋 My tasks", "view_tasks"),
-                            InlineKeyboardButton::callback("🌍 Set timezone", "settings:timezone"),
+                            InlineKeyboardButton::callback("⚙️ Settings", "settings"),
                         ],
                     ]);
 
                     bot.send_message(
                         msg.chat.id,
                         format!(
-"👋 Welcome, {}!
+"<b>{}</b>, welcome
 
-I'm your AI-powered task manager.
+I'm your AI task assistant.
+Text or voice — I'll understand.
 
-━━━━━━━━━━━━━━━━━━━━
-🚀 <b>Quick start</b>
-━━━━━━━━━━━━━━━━━━━━
+<code>Call mom tomorrow at 5pm</code>
+Try it now ↑
 
-Just send me a task:
-• \"Call mom tomorrow at 5pm\"
-• \"Buy groceries\"
-• 🎤 Or send a voice message!
-
-━━━━━━━━━━━━━━━━━━━━
-✨ <b>Features</b>
-━━━━━━━━━━━━━━━━━━━━
-
-📝 Natural language tasks
-⏰ Smart reminders
-🎤 Voice input
-✉️ Message drafts
-{}{}
-
-💡 <b>Tip:</b> Set your timezone for accurate reminders!", tg_user.first_name, trial_info, referral_bonus),
+{}{}", tg_user.first_name, trial_info, referral_bonus),
                     )
                     .parse_mode(teloxide::types::ParseMode::Html)
                     .reply_markup(welcome_keyboard)
@@ -432,31 +426,20 @@ Just send me a task:
             Command::Settings => {
                 if let Some(tg_user) = telegram_user {
                     if let Some(user) = User::find_by_telegram_id(&pool, tg_user.id.0 as i64).await {
-                        // Subscription status
-                        let sub_status = if user.has_active_subscription() {
-                            if user.subscription_type.as_deref() == Some("trial") {
-                                let days = user.trial_days_remaining().unwrap_or(0);
-                                format!("🎁 Trial: {} days left", days)
-                            } else if let Some(expires) = &user.subscription_expires_at {
-                                format!("✅ Active until {}", expires.split(' ').next().unwrap_or(expires))
-                            } else {
-                                "✅ Active".to_string()
-                            }
-                        } else {
-                            "❌ Expired".to_string()
-                        };
+                        let show_subscribe = !user.has_active_subscription()
+                            || user.trial_days_remaining().is_some();
 
                         let mut keyboard_rows = vec![
                             vec![
-                                InlineKeyboardButton::callback("🌍 Change timezone", "settings:timezone"),
+                                InlineKeyboardButton::callback("🌍 Timezone", "settings:timezone"),
+                                InlineKeyboardButton::callback("⏰ Brief time", "settings:brief_time"),
                             ],
                             vec![
-                                InlineKeyboardButton::callback("⏰ Change brief time", "settings:brief_time"),
+                                InlineKeyboardButton::callback("🎁 Invite friends", "settings:invite"),
                             ],
                         ];
 
-                        // Add subscribe button if not active or trial ending soon
-                        if !user.has_active_subscription() || user.trial_days_remaining().map(|d| d <= 2).unwrap_or(false) {
+                        if show_subscribe {
                             keyboard_rows.push(vec![
                                 InlineKeyboardButton::callback("⭐ Subscribe", "subscribe"),
                             ]);
@@ -467,16 +450,16 @@ Just send me a task:
                         bot.send_message(
                             msg.chat.id,
                             format!(
-                                "⚙️ Settings\n\n\
-                                📊 Subscription: {}\n\
+                                "⚙️ <b>Settings</b>\n\n\
+                                📊 Status: {}\n\
                                 🌍 Timezone: {}\n\
-                                ⏰ Morning brief: {}\n\n\
-                                Tap a button to change:",
-                                sub_status,
+                                ⏰ Morning brief: {}",
+                                user.subscription_status(),
                                 user.timezone,
                                 user.morning_brief_time
                             ),
                         )
+                        .parse_mode(teloxide::types::ParseMode::Html)
                         .reply_markup(settings_keyboard)
                         .await?;
                     } else {
@@ -623,6 +606,32 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                         bot.send_message(msg.chat.id, "Please /start first")
                             .await?;
                     }
+                }
+            }
+            Command::Admin => {
+                if let Some(tg_user) = telegram_user {
+                    if !is_admin(tg_user.id.0 as i64) {
+                        return Ok(());
+                    }
+
+                    let admin_keyboard = InlineKeyboardMarkup::new(vec![
+                        vec![
+                            InlineKeyboardButton::callback("📊 Stats", "admin:stats"),
+                            InlineKeyboardButton::callback("👥 Users", "admin:users"),
+                        ],
+                        vec![
+                            InlineKeyboardButton::callback("📢 Broadcast", "admin:broadcast"),
+                            InlineKeyboardButton::callback("🚫 Banned", "admin:banned"),
+                        ],
+                    ]);
+
+                    bot.send_message(
+                        msg.chat.id,
+                        "🔐 <b>Admin Panel</b>\n\nSelect an option:",
+                    )
+                    .parse_mode(teloxide::types::ParseMode::Html)
+                    .reply_markup(admin_keyboard)
+                    .await?;
                 }
             }
         }
@@ -839,6 +848,16 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                                 "❌ Support is temporarily unavailable.",
                                             ).await;
                                         }
+                                        return Ok(());
+                                    }
+                                    // Admin pending edits - ignore voice for these
+                                    PendingEdit::AdminSearch | PendingEdit::AdminBroadcast(_) | PendingEdit::AdminMessage(_) => {
+                                        // Admin features use text only
+                                        let _ = bot.edit_message_text(
+                                            msg.chat.id,
+                                            progress_msg.id,
+                                            "⚠️ Please send text message for admin actions.",
+                                        ).await;
                                         return Ok(());
                                     }
                                 }
@@ -1252,6 +1271,98 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                     "❌ Support is temporarily unavailable.",
                                 )
                                 .await?;
+                            }
+                            return Ok(());
+                        }
+                        PendingEdit::AdminSearch => {
+                            // Admin user search
+                            let query = text.trim().trim_start_matches('@');
+                            if let Ok(users) = User::search(&pool, query).await {
+                                if users.is_empty() {
+                                    bot.send_message(msg.chat.id, "🔍 No users found.")
+                                        .await?;
+                                } else {
+                                    let mut keyboard_rows = Vec::new();
+                                    for u in users.iter().take(10) {
+                                        let status = if u.is_banned() { "🚫" }
+                                            else if u.subscription_days_remaining().is_some() { "✅" }
+                                            else if u.trial_days_remaining().is_some() { "🎁" }
+                                            else { "❌" };
+                                        keyboard_rows.push(vec![
+                                            InlineKeyboardButton::callback(
+                                                format!("{} {}", status, u.display_name()),
+                                                format!("admin:user:{}", u.id)
+                                            )
+                                        ]);
+                                    }
+                                    keyboard_rows.push(vec![
+                                        InlineKeyboardButton::callback("↩️ Back", "admin:users")
+                                    ]);
+
+                                    let results_keyboard = InlineKeyboardMarkup::new(keyboard_rows);
+                                    bot.send_message(
+                                        msg.chat.id,
+                                        format!("🔍 Found {} user(s):", users.len()),
+                                    )
+                                    .reply_markup(results_keyboard)
+                                    .await?;
+                                }
+                            }
+                            return Ok(());
+                        }
+                        PendingEdit::AdminBroadcast(segment) => {
+                            // Send broadcast
+                            if let Ok(users) = User::list_by_segment(&pool, &segment).await {
+                                let total = users.len();
+                                let mut sent = 0;
+                                let mut failed = 0;
+
+                                bot.send_message(
+                                    msg.chat.id,
+                                    format!("📢 Sending to {} users...", total),
+                                ).await?;
+
+                                for target_user in users {
+                                    match bot.send_message(
+                                        ChatId(target_user.telegram_id),
+                                        text,
+                                    ).await {
+                                        Ok(_) => sent += 1,
+                                        Err(_) => failed += 1,
+                                    }
+                                    // Small delay to avoid rate limits
+                                    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                                }
+
+                                bot.send_message(
+                                    msg.chat.id,
+                                    format!("✅ Broadcast complete!\n\n📨 Sent: {}\n❌ Failed: {}", sent, failed),
+                                ).await?;
+                            }
+                            return Ok(());
+                        }
+                        PendingEdit::AdminMessage(target_user_id) => {
+                            // Send message to specific user
+                            if let Some(target_user) = User::find_by_id(&pool, target_user_id).await {
+                                match bot.send_message(
+                                    ChatId(target_user.telegram_id),
+                                    format!("📨 <b>Message from Admin:</b>\n\n{}", text),
+                                )
+                                .parse_mode(teloxide::types::ParseMode::Html)
+                                .await {
+                                    Ok(_) => {
+                                        bot.send_message(
+                                            msg.chat.id,
+                                            format!("✅ Message sent to {}", target_user.display_name()),
+                                        ).await?;
+                                    }
+                                    Err(e) => {
+                                        bot.send_message(
+                                            msg.chat.id,
+                                            format!("❌ Failed to send: {}", e),
+                                        ).await?;
+                                    }
+                                }
                             }
                             return Ok(());
                         }
@@ -1804,31 +1915,124 @@ pub async fn callback_handler(
             bot.answer_callback_query(q.id).text("✅ Brief time updated").await?;
         }
     } else if data == "settings:back" {
-        // Back to settings
+        // Back to settings - redirect to settings handler
         let telegram_id = q.from.id.0 as i64;
         if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
-            let settings_keyboard = InlineKeyboardMarkup::new(vec![
+            let show_subscribe = !user.has_active_subscription()
+                || user.trial_days_remaining().is_some();
+
+            let mut keyboard_rows = vec![
                 vec![
-                    InlineKeyboardButton::callback("🌍 Change timezone", "settings:timezone"),
+                    InlineKeyboardButton::callback("🌍 Timezone", "settings:timezone"),
+                    InlineKeyboardButton::callback("⏰ Brief time", "settings:brief_time"),
                 ],
                 vec![
-                    InlineKeyboardButton::callback("⏰ Change brief time", "settings:brief_time"),
+                    InlineKeyboardButton::callback("🎁 Invite friends", "settings:invite"),
                 ],
-            ]);
+            ];
+
+            if show_subscribe {
+                keyboard_rows.push(vec![
+                    InlineKeyboardButton::callback("⭐ Subscribe", "subscribe"),
+                ]);
+            }
+
+            let settings_keyboard = InlineKeyboardMarkup::new(keyboard_rows);
 
             if let Some(msg) = &q.message {
                 bot.edit_message_text(
                     msg.chat().id,
                     msg.id(),
                     format!(
-                        "⚙️ Settings\n\n\
+                        "⚙️ <b>Settings</b>\n\n\
+                        📊 Status: {}\n\
                         🌍 Timezone: {}\n\
-                        ⏰ Morning brief: {}\n\n\
-                        Tap a button to change:",
+                        ⏰ Morning brief: {}",
+                        user.subscription_status(),
                         user.timezone,
                         user.morning_brief_time
                     ),
                 )
+                .parse_mode(teloxide::types::ParseMode::Html)
+                .reply_markup(settings_keyboard)
+                .await?;
+            }
+        }
+
+        bot.answer_callback_query(q.id).await?;
+    } else if data == "settings:invite" {
+        // Show invite/referral info
+        let telegram_id = q.from.id.0 as i64;
+        if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
+            let referral_code = User::ensure_referral_code(&pool, user.id).await.ok();
+            let (referral_count, bonus_days) = user.referral_stats();
+
+            let code = referral_code.as_deref().unwrap_or("");
+            let invite_text = format!(
+                "🎁 <b>Invite Friends</b>\n\n\
+                Share your link:\n\
+                <code>https://t.me/{}?start={}</code>\n\n\
+                ✨ You both get +7 days free!\n\n\
+                📊 Invited: {} · Bonus: {} days",
+                BOT_USERNAME,
+                code,
+                referral_count,
+                bonus_days
+            );
+
+            let invite_keyboard = InlineKeyboardMarkup::new(vec![
+                vec![InlineKeyboardButton::callback("↩️ Back", "settings:back")],
+            ]);
+
+            if let Some(msg) = &q.message {
+                bot.edit_message_text(msg.chat().id, msg.id(), invite_text)
+                    .parse_mode(teloxide::types::ParseMode::Html)
+                    .reply_markup(invite_keyboard)
+                    .await?;
+            }
+        }
+
+        bot.answer_callback_query(q.id).await?;
+    } else if data == "settings" {
+        // Show settings menu
+        let telegram_id = q.from.id.0 as i64;
+        if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
+            let show_subscribe = !user.has_active_subscription()
+                || user.trial_days_remaining().is_some();
+
+            let mut keyboard_rows = vec![
+                vec![
+                    InlineKeyboardButton::callback("🌍 Timezone", "settings:timezone"),
+                    InlineKeyboardButton::callback("⏰ Brief time", "settings:brief_time"),
+                ],
+                vec![
+                    InlineKeyboardButton::callback("🎁 Invite friends", "settings:invite"),
+                ],
+            ];
+
+            if show_subscribe {
+                keyboard_rows.push(vec![
+                    InlineKeyboardButton::callback("⭐ Subscribe", "subscribe"),
+                ]);
+            }
+
+            let settings_keyboard = InlineKeyboardMarkup::new(keyboard_rows);
+
+            if let Some(msg) = &q.message {
+                bot.edit_message_text(
+                    msg.chat().id,
+                    msg.id(),
+                    format!(
+                        "⚙️ <b>Settings</b>\n\n\
+                        📊 Status: {}\n\
+                        🌍 Timezone: {}\n\
+                        ⏰ Morning brief: {}",
+                        user.subscription_status(),
+                        user.timezone,
+                        user.morning_brief_time
+                    ),
+                )
+                .parse_mode(teloxide::types::ParseMode::Html)
                 .reply_markup(settings_keyboard)
                 .await?;
             }
@@ -2219,6 +2423,431 @@ pub async fn callback_handler(
         }
 
         bot.answer_callback_query(q.id).await?;
+    } else if data.starts_with("admin:") {
+        // Admin callbacks - check permission first
+        let telegram_id = q.from.id.0 as i64;
+        if !is_admin(telegram_id) {
+            bot.answer_callback_query(q.id).text("⛔ Access denied").await?;
+            return Ok(());
+        }
+
+        let action = data.strip_prefix("admin:").unwrap_or("");
+
+        match action {
+            "stats" => {
+                if let Ok(stats) = User::admin_stats(&pool).await {
+                    let stats_text = format!(
+"📊 <b>Statistics</b>
+
+👥 <b>Users</b>
+├─ Total: <b>{}</b>
+├─ 🎁 Trial: <b>{}</b>
+├─ ✅ Paid: <b>{}</b>
+├─ ❌ Expired: <b>{}</b>
+└─ 🚫 Banned: <b>{}</b>
+
+📈 <b>Activity</b>
+├─ Active 7d: <b>{}</b>
+└─ Active 30d: <b>{}</b>
+
+🆕 <b>Growth</b>
+├─ Today: <b>+{}</b>
+└─ This week: <b>+{}</b>",
+                        stats.total,
+                        stats.trial,
+                        stats.paid,
+                        stats.expired,
+                        stats.banned,
+                        stats.active_7d,
+                        stats.active_30d,
+                        stats.new_today,
+                        stats.new_week
+                    );
+
+                    let back_keyboard = InlineKeyboardMarkup::new(vec![
+                        vec![InlineKeyboardButton::callback("↩️ Back", "admin:menu")],
+                    ]);
+
+                    if let Some(msg) = &q.message {
+                        bot.edit_message_text(msg.chat().id, msg.id(), stats_text)
+                            .parse_mode(teloxide::types::ParseMode::Html)
+                            .reply_markup(back_keyboard)
+                            .await?;
+                    }
+                }
+                bot.answer_callback_query(q.id).await?;
+            }
+            "users" => {
+                let users_keyboard = InlineKeyboardMarkup::new(vec![
+                    vec![
+                        InlineKeyboardButton::callback("🔍 Search", "admin:search"),
+                        InlineKeyboardButton::callback("📋 Recent", "admin:recent"),
+                    ],
+                    vec![InlineKeyboardButton::callback("↩️ Back", "admin:menu")],
+                ]);
+
+                if let Some(msg) = &q.message {
+                    bot.edit_message_text(
+                        msg.chat().id,
+                        msg.id(),
+                        "👥 <b>User Management</b>\n\nSearch by @username, name or ID:",
+                    )
+                    .parse_mode(teloxide::types::ParseMode::Html)
+                    .reply_markup(users_keyboard)
+                    .await?;
+                }
+                bot.answer_callback_query(q.id).await?;
+            }
+            "search" => {
+                // Set pending admin search
+                context.set_pending_edit(telegram_id, PendingEdit::AdminSearch);
+
+                let cancel_keyboard = InlineKeyboardMarkup::new(vec![
+                    vec![InlineKeyboardButton::callback("↩️ Cancel", "admin:users")],
+                ]);
+
+                if let Some(msg) = &q.message {
+                    bot.edit_message_text(
+                        msg.chat().id,
+                        msg.id(),
+                        "🔍 <b>Search User</b>\n\nSend @username, name or telegram ID:",
+                    )
+                    .parse_mode(teloxide::types::ParseMode::Html)
+                    .reply_markup(cancel_keyboard)
+                    .await?;
+                }
+                bot.answer_callback_query(q.id).text("Enter search query").await?;
+            }
+            "recent" => {
+                if let Ok(users) = User::list_all(&pool, 10, 0).await {
+                    let mut text = "📋 <b>Recent Users</b>\n\n".to_string();
+                    for u in &users {
+                        let status = if u.is_banned() {
+                            "🚫"
+                        } else if u.subscription_days_remaining().is_some() {
+                            "✅"
+                        } else if u.trial_days_remaining().is_some() {
+                            "🎁"
+                        } else {
+                            "❌"
+                        };
+                        text.push_str(&format!(
+                            "{} {} (ID: {})\n",
+                            status,
+                            u.display_name(),
+                            u.id
+                        ));
+                    }
+
+                    let back_keyboard = InlineKeyboardMarkup::new(vec![
+                        vec![InlineKeyboardButton::callback("↩️ Back", "admin:users")],
+                    ]);
+
+                    if let Some(msg) = &q.message {
+                        bot.edit_message_text(msg.chat().id, msg.id(), text)
+                            .parse_mode(teloxide::types::ParseMode::Html)
+                            .reply_markup(back_keyboard)
+                            .await?;
+                    }
+                }
+                bot.answer_callback_query(q.id).await?;
+            }
+            "broadcast" => {
+                let broadcast_keyboard = InlineKeyboardMarkup::new(vec![
+                    vec![
+                        InlineKeyboardButton::callback("📢 All users", "admin:bc:all"),
+                        InlineKeyboardButton::callback("🎁 Trial", "admin:bc:trial"),
+                    ],
+                    vec![
+                        InlineKeyboardButton::callback("✅ Paid", "admin:bc:paid"),
+                        InlineKeyboardButton::callback("❌ Expired", "admin:bc:expired"),
+                    ],
+                    vec![InlineKeyboardButton::callback("↩️ Back", "admin:menu")],
+                ]);
+
+                if let Some(msg) = &q.message {
+                    bot.edit_message_text(
+                        msg.chat().id,
+                        msg.id(),
+                        "📢 <b>Broadcast</b>\n\nSelect target audience:",
+                    )
+                    .parse_mode(teloxide::types::ParseMode::Html)
+                    .reply_markup(broadcast_keyboard)
+                    .await?;
+                }
+                bot.answer_callback_query(q.id).await?;
+            }
+            "banned" => {
+                if let Ok(banned) = User::list_banned(&pool).await {
+                    let text = if banned.is_empty() {
+                        "🚫 <b>Banned Users</b>\n\nNo banned users.".to_string()
+                    } else {
+                        let mut t = "🚫 <b>Banned Users</b>\n\n".to_string();
+                        for u in &banned {
+                            t.push_str(&format!(
+                                "• {} — {}\n",
+                                u.display_name(),
+                                u.ban_reason.as_deref().unwrap_or("No reason")
+                            ));
+                        }
+                        t
+                    };
+
+                    let back_keyboard = InlineKeyboardMarkup::new(vec![
+                        vec![InlineKeyboardButton::callback("↩️ Back", "admin:menu")],
+                    ]);
+
+                    if let Some(msg) = &q.message {
+                        bot.edit_message_text(msg.chat().id, msg.id(), text)
+                            .parse_mode(teloxide::types::ParseMode::Html)
+                            .reply_markup(back_keyboard)
+                            .await?;
+                    }
+                }
+                bot.answer_callback_query(q.id).await?;
+            }
+            "menu" => {
+                let admin_keyboard = InlineKeyboardMarkup::new(vec![
+                    vec![
+                        InlineKeyboardButton::callback("📊 Stats", "admin:stats"),
+                        InlineKeyboardButton::callback("👥 Users", "admin:users"),
+                    ],
+                    vec![
+                        InlineKeyboardButton::callback("📢 Broadcast", "admin:broadcast"),
+                        InlineKeyboardButton::callback("🚫 Banned", "admin:banned"),
+                    ],
+                ]);
+
+                if let Some(msg) = &q.message {
+                    bot.edit_message_text(
+                        msg.chat().id,
+                        msg.id(),
+                        "🔐 <b>Admin Panel</b>\n\nSelect an option:",
+                    )
+                    .parse_mode(teloxide::types::ParseMode::Html)
+                    .reply_markup(admin_keyboard)
+                    .await?;
+                }
+                bot.answer_callback_query(q.id).await?;
+            }
+            _ => {
+                bot.answer_callback_query(q.id).await?;
+            }
+        }
+    } else if let Some(bc_segment) = data.strip_prefix("admin:bc:") {
+        // Broadcast segment selection
+        let telegram_id = q.from.id.0 as i64;
+        if !is_admin(telegram_id) {
+            bot.answer_callback_query(q.id).text("⛔ Access denied").await?;
+            return Ok(());
+        }
+
+        // Set pending broadcast with segment
+        context.set_pending_edit(telegram_id, PendingEdit::AdminBroadcast(bc_segment.to_string()));
+
+        let segment_name = match bc_segment {
+            "all" => "all users",
+            "trial" => "trial users",
+            "paid" => "paid users",
+            "expired" => "expired users",
+            _ => "users",
+        };
+
+        let cancel_keyboard = InlineKeyboardMarkup::new(vec![
+            vec![InlineKeyboardButton::callback("↩️ Cancel", "admin:broadcast")],
+        ]);
+
+        if let Some(msg) = &q.message {
+            bot.edit_message_text(
+                msg.chat().id,
+                msg.id(),
+                format!("📢 <b>Broadcast to {}</b>\n\nSend your message:", segment_name),
+            )
+            .parse_mode(teloxide::types::ParseMode::Html)
+            .reply_markup(cancel_keyboard)
+            .await?;
+        }
+
+        bot.answer_callback_query(q.id).text("Send broadcast message").await?;
+    } else if let Some(user_id_str) = data.strip_prefix("admin:user:") {
+        // Show user card
+        let telegram_id = q.from.id.0 as i64;
+        if !is_admin(telegram_id) {
+            bot.answer_callback_query(q.id).text("⛔ Access denied").await?;
+            return Ok(());
+        }
+
+        if let Ok(user_id) = user_id_str.parse::<i64>() {
+            if let Some(user) = User::find_by_id(&pool, user_id).await {
+                let status = user.subscription_status();
+                let tasks_count = Task::count_by_user(&pool, user.id).await.unwrap_or(0);
+
+                let card_text = format!(
+"👤 <b>{}</b>
+ID: <code>{}</code> | TG: <code>{}</code>
+
+📊 Status: {}
+📅 Joined: {}
+📝 Tasks: {}
+🔗 Referrals: {}",
+                    user.display_name(),
+                    user.id,
+                    user.telegram_id,
+                    status,
+                    user.created_at.split(' ').next().unwrap_or(&user.created_at),
+                    tasks_count,
+                    user.referral_count.unwrap_or(0)
+                );
+
+                let mut buttons = vec![
+                    vec![
+                        InlineKeyboardButton::callback("📅 +30 days", format!("admin:grant:{}:30", user.id)),
+                        InlineKeyboardButton::callback("📅 +90 days", format!("admin:grant:{}:90", user.id)),
+                    ],
+                    vec![
+                        InlineKeyboardButton::callback("📅 +365 days", format!("admin:grant:{}:365", user.id)),
+                    ],
+                ];
+
+                if user.is_banned() {
+                    buttons.push(vec![
+                        InlineKeyboardButton::callback("✅ Unban", format!("admin:unban:{}", user.id)),
+                    ]);
+                } else {
+                    buttons.push(vec![
+                        InlineKeyboardButton::callback("🚫 Ban", format!("admin:ban:{}", user.id)),
+                        InlineKeyboardButton::callback("💬 Message", format!("admin:msg:{}", user.id)),
+                    ]);
+                }
+
+                buttons.push(vec![
+                    InlineKeyboardButton::callback("↩️ Back", "admin:users"),
+                ]);
+
+                let user_keyboard = InlineKeyboardMarkup::new(buttons);
+
+                if let Some(msg) = &q.message {
+                    bot.edit_message_text(msg.chat().id, msg.id(), card_text)
+                        .parse_mode(teloxide::types::ParseMode::Html)
+                        .reply_markup(user_keyboard)
+                        .await?;
+                }
+            }
+        }
+
+        bot.answer_callback_query(q.id).await?;
+    } else if let Some(grant_data) = data.strip_prefix("admin:grant:") {
+        // Grant subscription
+        let telegram_id = q.from.id.0 as i64;
+        if !is_admin(telegram_id) {
+            bot.answer_callback_query(q.id).text("⛔ Access denied").await?;
+            return Ok(());
+        }
+
+        let parts: Vec<&str> = grant_data.split(':').collect();
+        if parts.len() == 2 {
+            if let (Ok(user_id), Ok(days)) = (parts[0].parse::<i64>(), parts[1].parse::<i64>()) {
+                if User::grant_subscription(&pool, user_id, days).await.is_ok() {
+                    bot.answer_callback_query(q.id).text(format!("✅ Granted {} days", days)).await?;
+
+                    // Refresh user card
+                    if let Some(user) = User::find_by_id(&pool, user_id).await {
+                        let status = user.subscription_status();
+                        if let Some(msg) = &q.message {
+                            bot.edit_message_text(
+                                msg.chat().id,
+                                msg.id(),
+                                format!("✅ Subscription granted!\n\n👤 {} — {}", user.display_name(), status),
+                            )
+                            .reply_markup(InlineKeyboardMarkup::new(vec![
+                                vec![InlineKeyboardButton::callback("↩️ Back", "admin:users")],
+                            ]))
+                            .await?;
+                        }
+                    }
+                } else {
+                    bot.answer_callback_query(q.id).text("❌ Failed").await?;
+                }
+            }
+        }
+    } else if let Some(user_id_str) = data.strip_prefix("admin:ban:") {
+        // Ban user
+        let telegram_id = q.from.id.0 as i64;
+        if !is_admin(telegram_id) {
+            bot.answer_callback_query(q.id).text("⛔ Access denied").await?;
+            return Ok(());
+        }
+
+        if let Ok(user_id) = user_id_str.parse::<i64>() {
+            if User::ban(&pool, user_id, Some("Banned by admin")).await.is_ok() {
+                bot.answer_callback_query(q.id).text("🚫 User banned").await?;
+
+                if let Some(msg) = &q.message {
+                    bot.edit_message_text(
+                        msg.chat().id,
+                        msg.id(),
+                        "🚫 User has been banned.",
+                    )
+                    .reply_markup(InlineKeyboardMarkup::new(vec![
+                        vec![InlineKeyboardButton::callback("↩️ Back", "admin:users")],
+                    ]))
+                    .await?;
+                }
+            }
+        }
+    } else if let Some(user_id_str) = data.strip_prefix("admin:unban:") {
+        // Unban user
+        let telegram_id = q.from.id.0 as i64;
+        if !is_admin(telegram_id) {
+            bot.answer_callback_query(q.id).text("⛔ Access denied").await?;
+            return Ok(());
+        }
+
+        if let Ok(user_id) = user_id_str.parse::<i64>() {
+            if User::unban(&pool, user_id).await.is_ok() {
+                bot.answer_callback_query(q.id).text("✅ User unbanned").await?;
+
+                if let Some(msg) = &q.message {
+                    bot.edit_message_text(
+                        msg.chat().id,
+                        msg.id(),
+                        "✅ User has been unbanned.",
+                    )
+                    .reply_markup(InlineKeyboardMarkup::new(vec![
+                        vec![InlineKeyboardButton::callback("↩️ Back", "admin:users")],
+                    ]))
+                    .await?;
+                }
+            }
+        }
+    } else if let Some(user_id_str) = data.strip_prefix("admin:msg:") {
+        // Set pending admin message to user
+        let telegram_id = q.from.id.0 as i64;
+        if !is_admin(telegram_id) {
+            bot.answer_callback_query(q.id).text("⛔ Access denied").await?;
+            return Ok(());
+        }
+
+        if let Ok(user_id) = user_id_str.parse::<i64>() {
+            context.set_pending_edit(telegram_id, PendingEdit::AdminMessage(user_id));
+
+            let cancel_keyboard = InlineKeyboardMarkup::new(vec![
+                vec![InlineKeyboardButton::callback("↩️ Cancel", format!("admin:user:{}", user_id))],
+            ]);
+
+            if let Some(msg) = &q.message {
+                bot.edit_message_text(
+                    msg.chat().id,
+                    msg.id(),
+                    "💬 <b>Send Message</b>\n\nType your message to send to this user:",
+                )
+                .parse_mode(teloxide::types::ParseMode::Html)
+                .reply_markup(cancel_keyboard)
+                .await?;
+            }
+        }
+
+        bot.answer_callback_query(q.id).text("Type message").await?;
     }
 
     Ok(())
