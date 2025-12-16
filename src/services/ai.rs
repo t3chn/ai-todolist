@@ -52,6 +52,8 @@ pub enum ParsedInput {
     Draft { recipient: String, context: String, draft: String },
     #[serde(rename = "command")]
     Command { action: String },
+    #[serde(rename = "clarify")]
+    Clarify { original: String, question: String, suggestions: Vec<String> },
     #[serde(rename = "rejected")]
     Rejected { reason: String },
 }
@@ -150,15 +152,24 @@ Examples:
 Current date: {current_date}
 
 Classify the input into one of these intents:
-1. "task" - Creating a task/reminder/todo
-2. "draft" - Drafting a message to someone
-3. "command" - Bot commands (show tasks, today's tasks, settings, help)
-4. "rejected" - Everything else
+1. "task" - Creating a specific, actionable task/reminder/todo
+2. "clarify" - Vague/broad task that needs to be more specific
+3. "draft" - Drafting a message to someone
+4. "command" - Bot commands (show tasks, today's tasks, settings, help)
+5. "rejected" - Everything else
 
 Return JSON only, no markdown.
 
-For TASK intent:
+For TASK intent (specific, actionable):
 {{"intent": "task", "title": "task title", "due_at": "YYYY-MM-DD HH:MM" or null, "tags": ["tag1"]}}
+
+For CLARIFY intent (vague tasks like "learn Japanese", "get healthy", "organize life"):
+{{"intent": "clarify", "original": "user's input", "question": "what specific action?", "suggestions": ["option1", "option2", "option3"]}}
+
+Use CLARIFY when task is:
+- Too broad: "learn Japanese", "get fit", "be more productive"
+- No clear action: "think about project", "handle emails"
+- Long-term goals disguised as tasks: "lose weight", "save money"
 
 For DRAFT intent:
 {{"intent": "draft", "recipient": "who", "context": "about what", "draft": "the message"}}
@@ -179,11 +190,10 @@ REJECT: questions, greetings, conversations, info requests, off-topic.
 
 Examples:
 "call mom tomorrow" -> {{"intent": "task", "title": "Call mom", "due_at": "2024-01-02", "tags": ["personal"]}}
+"learn Japanese" -> {{"intent": "clarify", "original": "learn Japanese", "question": "What specific step?", "suggestions": ["Study hiragana 30 min", "Complete Duolingo lesson", "Watch Japanese video"]}}
+"get healthy" -> {{"intent": "clarify", "original": "get healthy", "question": "What action today?", "suggestions": ["Go for a 20 min walk", "Drink 8 glasses of water", "Do 10 pushups"]}}
 "напиши сообщение боссу" -> {{"intent": "draft", "recipient": "boss", "context": "message", "draft": "..."}}
 "покажи мои задачи" -> {{"intent": "command", "action": "show_tasks"}}
-"что на сегодня" -> {{"intent": "command", "action": "show_today"}}
-"show my tasks" -> {{"intent": "command", "action": "show_tasks"}}
-"what do I need to do" -> {{"intent": "command", "action": "show_tasks"}}
 "привет как дела" -> {{"intent": "rejected", "reason": "Привет! Напиши задачу или скажи 'покажи задачи'"}}
 {context_section}"#
         );

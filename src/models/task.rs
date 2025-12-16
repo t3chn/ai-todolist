@@ -311,4 +311,15 @@ impl Task {
             .await?;
         Ok(())
     }
+
+    /// Count tasks completed today
+    pub async fn count_completed_today(pool: &SqlitePool, user_id: i64) -> i64 {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM tasks WHERE user_id = ? AND status = 'done' AND date(updated_at) = date('now')"
+        )
+        .bind(user_id)
+        .fetch_one(pool)
+        .await
+        .unwrap_or(0)
+    }
 }

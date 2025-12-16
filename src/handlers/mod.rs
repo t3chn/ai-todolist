@@ -1027,6 +1027,23 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                         format!("🎤 \"{}\"\n\n✉️ Draft for {}:\n\n{}\n\n💡 Copy and send!", transcript, recipient, draft),
                                     ).await;
                                 }
+                                Ok(ParsedInput::Clarify { original: _, question, suggestions }) => {
+                                    // Build suggestion buttons
+                                    let mut keyboard_rows: Vec<Vec<InlineKeyboardButton>> = suggestions.iter()
+                                        .map(|s| vec![InlineKeyboardButton::callback(s.clone(), format!("clarify:{}", s))])
+                                        .collect();
+                                    keyboard_rows.push(vec![
+                                        InlineKeyboardButton::callback("📝 Create as-is", format!("clarify:asis:{}", transcript))
+                                    ]);
+
+                                    let _ = bot.edit_message_text(
+                                        msg.chat.id,
+                                        progress_msg.id,
+                                        format!("🎤 \"{}\"\n\n🤔 {}\n\nPick a specific action:", transcript, question),
+                                    )
+                                    .reply_markup(InlineKeyboardMarkup::new(keyboard_rows))
+                                    .await;
+                                }
                                 Ok(ParsedInput::Command { action }) => {
                                     // Delete progress message and handle command
                                     let _ = bot.delete_message(msg.chat.id, progress_msg.id).await;
@@ -1584,6 +1601,23 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                             )
                             .await?;
                         }
+                        Ok(ParsedInput::Clarify { original, question, suggestions }) => {
+                            tracing::info!("AI needs clarification for: {}", original);
+                            // Build suggestion buttons
+                            let mut keyboard_rows: Vec<Vec<InlineKeyboardButton>> = suggestions.iter()
+                                .map(|s| vec![InlineKeyboardButton::callback(s.clone(), format!("clarify:{}", s))])
+                                .collect();
+                            keyboard_rows.push(vec![
+                                InlineKeyboardButton::callback("📝 Create as-is", format!("clarify:asis:{}", original))
+                            ]);
+
+                            bot.send_message(
+                                msg.chat.id,
+                                format!("🤔 {}\n\nPick a specific action:", question),
+                            )
+                            .reply_markup(InlineKeyboardMarkup::new(keyboard_rows))
+                            .await?;
+                        }
                         Ok(ParsedInput::Command { action }) => {
                             tracing::info!("AI command: {}", action);
                             match action.as_str() {
@@ -1758,42 +1792,51 @@ pub async fn callback_handler(
             if let Some(task) = Task::find_by_id(&pool, task_id).await {
                 let _ = Task::update_status(&pool, task_id, TaskStatus::Done).await;
 
-                // Update message
-                if let Some(msg) = &q.message {
-                    bot.edit_message_text(
-                        msg.chat().id,
-                        msg.id(),
-                        format!("✅ {}", task.title),
-                    )
-                    .await?;
-                }
-
-                // Show next task suggestion
                 let telegram_id = q.from.id.0 as i64;
                 if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
+                    // Get stats
+                    let completed_today = Task::count_completed_today(&pool, user.id).await;
                     let pending = Task::find_pending_by_user(&pool, user.id).await.unwrap_or_default();
+                    let total_today = completed_today + pending.len() as i64;
 
+                    // Celebration message
+                    let celebration = match completed_today {
+                        1 => "🎯 First one today!",
+                        2..=4 => "🔥 Keep going!",
+                        5..=9 => "⚡ On fire!",
+                        _ => "🏆 Unstoppable!",
+                    };
+
+                    // Update message with celebration
                     if let Some(msg) = &q.message {
+                        bot.edit_message_text(
+                            msg.chat().id,
+                            msg.id(),
+                            format!("✅ {}\n\n📊 {}/{} today. {}", task.title, completed_today, total_today, celebration),
+                        )
+                        .await?;
+
+                        // Show next task
                         if let Some(next_task) = pending.first() {
                             let due_str = next_task.due_at.as_ref()
-                                .map(|d| format!("\n📅 {}", d))
+                                .map(|d| format!(" 📅 {}", d))
                                 .unwrap_or_default();
 
                             let next_keyboard = InlineKeyboardMarkup::new(vec![vec![
                                 InlineKeyboardButton::callback("✅ Do it", format!("done:{}", next_task.id)),
-                                InlineKeyboardButton::callback("📋 View all", "view_tasks".to_string()),
+                                InlineKeyboardButton::callback("📋 All tasks", "view_tasks".to_string()),
                             ]]);
 
                             bot.send_message(
                                 msg.chat().id,
-                                format!("🎯 Next up:\n\n📝 {}{}", next_task.title, due_str),
+                                format!("🎯 Next: {}{}", next_task.title, due_str),
                             )
                             .reply_markup(next_keyboard)
                             .await?;
                         } else {
                             bot.send_message(
                                 msg.chat().id,
-                                "🎉 All done! No more pending tasks.",
+                                format!("🎉 All done! {} tasks completed today.", completed_today),
                             )
                             .await?;
                         }
@@ -2058,6 +2101,52 @@ pub async fn callback_handler(
                 }
 
                 bot.answer_callback_query(q.id).text("✅ Kept").await?;
+            }
+        }
+    } else if let Some(title) = data.strip_prefix("clarify:asis:") {
+        // Create task with original vague title
+        let telegram_id = q.from.id.0 as i64;
+        if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
+            match Task::create(&pool, user.id, title, None, None, None).await {
+                Ok(task) => {
+                    if let Some(msg) = q.message {
+                        bot.edit_message_text(
+                            msg.chat().id,
+                            msg.id(),
+                            format!("✅ Added!\n\n📝 {}", task.title),
+                        )
+                        .reply_markup(task_keyboard(task.id))
+                        .await?;
+                    }
+                    bot.answer_callback_query(q.id).text("✅ Created").await?;
+                }
+                Err(e) => {
+                    tracing::error!("Failed to create task: {}", e);
+                    bot.answer_callback_query(q.id).text("❌ Failed").await?;
+                }
+            }
+        }
+    } else if let Some(title) = data.strip_prefix("clarify:") {
+        // Create task with suggested specific title
+        let telegram_id = q.from.id.0 as i64;
+        if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
+            match Task::create(&pool, user.id, title, None, None, None).await {
+                Ok(task) => {
+                    if let Some(msg) = q.message {
+                        bot.edit_message_text(
+                            msg.chat().id,
+                            msg.id(),
+                            format!("✅ Added!\n\n📝 {}", task.title),
+                        )
+                        .reply_markup(task_keyboard(task.id))
+                        .await?;
+                    }
+                    bot.answer_callback_query(q.id).text("✅ Created").await?;
+                }
+                Err(e) => {
+                    tracing::error!("Failed to create task: {}", e);
+                    bot.answer_callback_query(q.id).text("❌ Failed").await?;
+                }
             }
         }
     } else if data == "settings:timezone" {
