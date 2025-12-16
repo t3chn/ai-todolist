@@ -322,4 +322,26 @@ impl Task {
         .await
         .unwrap_or(0)
     }
+
+    /// Count tasks completed this week
+    pub async fn count_completed_week(pool: &SqlitePool, user_id: i64) -> i64 {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM tasks WHERE user_id = ? AND status = 'done' AND updated_at > datetime('now', '-7 days')"
+        )
+        .bind(user_id)
+        .fetch_one(pool)
+        .await
+        .unwrap_or(0)
+    }
+
+    /// Count tasks created this week
+    pub async fn count_created_week(pool: &SqlitePool, user_id: i64) -> i64 {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM tasks WHERE user_id = ? AND created_at > datetime('now', '-7 days')"
+        )
+        .bind(user_id)
+        .fetch_one(pool)
+        .await
+        .unwrap_or(0)
+    }
 }

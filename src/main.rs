@@ -8,7 +8,7 @@ mod handlers;
 mod models;
 mod services;
 
-use services::{AiService, ConversationContext, morning_brief, reminder};
+use services::{AiService, ConversationContext, morning_brief, reminder, weekly_review};
 
 #[tokio::main]
 async fn main() {
@@ -62,6 +62,13 @@ async fn main() {
     let brief_pool = pool.clone();
     tokio::spawn(async move {
         morning_brief::start_morning_brief_loop(brief_bot, brief_pool).await;
+    });
+
+    // Start weekly review service in background
+    let weekly_bot = bot.clone();
+    let weekly_pool = pool.clone();
+    tokio::spawn(async move {
+        weekly_review::start_weekly_review_loop(weekly_bot, weekly_pool).await;
     });
 
     Dispatcher::builder(bot, handler)
