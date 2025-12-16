@@ -80,11 +80,12 @@ impl Task {
         title: &str,
         description: Option<&str>,
         due_at: Option<&str>,
+        tags: Option<&str>,
     ) -> Result<Self, sqlx::Error> {
         sqlx::query_as::<_, Task>(
             r#"
-            INSERT INTO tasks (user_id, title, description, due_at)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO tasks (user_id, title, description, due_at, tags)
+            VALUES (?, ?, ?, ?, ?)
             RETURNING *
             "#,
         )
@@ -92,6 +93,7 @@ impl Task {
         .bind(title)
         .bind(description)
         .bind(due_at)
+        .bind(tags)
         .fetch_one(pool)
         .await
     }
@@ -256,6 +258,54 @@ impl Task {
     pub async fn set_reminder(pool: &SqlitePool, id: i64, reminder_at: Option<&str>) -> Result<(), sqlx::Error> {
         sqlx::query("UPDATE tasks SET reminder_at = ?, updated_at = datetime('now') WHERE id = ?")
             .bind(reminder_at)
+            .bind(id)
+            .execute(pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Find potential duplicate tasks (similar title, pending status)
+    pub async fn find_similar(pool: &SqlitePool, user_id: i64, title: &str) -> Option<Self> {
+        // Normalize title for comparison
+        let normalized = title.to_lowercase().trim().to_string();
+
+        // Get pending tasks and check for similarity
+        let tasks = sqlx::query_as::<_, Task>(
+            "SELECT * FROM tasks WHERE user_id = ? AND status IN ('pending', 'in_progress')"
+        )
+        .bind(user_id)
+        .fetch_all(pool)
+        .await
+        .ok()?;
+
+        for task in tasks {
+            let task_normalized = task.title.to_lowercase();
+            // Check for exact match or substring match
+            if task_normalized == normalized
+                || task_normalized.contains(&normalized)
+                || normalized.contains(&task_normalized) {
+                return Some(task);
+            }
+        }
+        None
+    }
+
+    /// Find stale tasks (pending, not updated in days_threshold days)
+    pub async fn find_stale(pool: &SqlitePool, user_id: i64, days_threshold: i64) -> Result<Vec<Self>, sqlx::Error> {
+        sqlx::query_as::<_, Task>(
+            &format!(
+                "SELECT * FROM tasks WHERE user_id = ? AND status IN ('pending', 'in_progress') AND updated_at < datetime('now', '-{} days') ORDER BY updated_at ASC",
+                days_threshold
+            )
+        )
+        .bind(user_id)
+        .fetch_all(pool)
+        .await
+    }
+
+    /// Touch task (update updated_at to now)
+    pub async fn touch(pool: &SqlitePool, id: i64) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE tasks SET updated_at = datetime('now') WHERE id = ?")
             .bind(id)
             .execute(pool)
             .await?;

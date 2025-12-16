@@ -5,5 +5,5 @@ pub mod rate_limit;
 pub mod reminder;
 
 pub use ai::{AiService, ParsedInput, ParsedTask};
-pub use context::{ConversationContext, PendingEdit, ProposedEdit};
+pub use context::{ConversationContext, PendingEdit, PendingTask, ProposedEdit};
 pub use rate_limit::{RateLimiter, RateLimits};

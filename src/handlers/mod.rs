@@ -1,5 +1,5 @@
 use crate::models::{Task, TaskStatus, User};
-use crate::services::{AiService, ConversationContext, ParsedInput, PendingEdit, ProposedEdit, RateLimiter, RateLimits};
+use crate::services::{AiService, ConversationContext, ParsedInput, PendingEdit, PendingTask, ProposedEdit, RateLimiter, RateLimits};
 use chrono::Utc;
 use sqlx::SqlitePool;
 use std::sync::Arc;
@@ -11,9 +11,9 @@ use teloxide::{
 };
 
 // Subscription prices in Telegram Stars
-const PRICE_1_MONTH: i32 = 150;  // ~$3
-const PRICE_3_MONTHS: i32 = 400; // ~$8 (save ~$1)
-const PRICE_12_MONTHS: i32 = 1200; // ~$25 (save ~$11)
+const PRICE_1_MONTH: i32 = 250;  // ~$5
+const PRICE_3_MONTHS: i32 = 600; // ~$12 (save ~$3)
+const PRICE_12_MONTHS: i32 = 2000; // ~$40 (save ~$20)
 
 /// Check subscription status and return appropriate message if expired
 fn check_subscription(user: &User) -> Option<String> {
@@ -23,9 +23,9 @@ fn check_subscription(user: &User) -> Option<String> {
         Some(
             "⏰ Your trial has ended!\n\n\
             To continue using AI Todolist, subscribe:\n\n\
-            ⭐ 1 month — 150 Stars (~$3)\n\
-            ⭐ 3 months — 400 Stars (~$8)\n\
-            ⭐ 12 months — 1200 Stars (~$25)\n\n\
+            ⭐ 1 month — 250 Stars (~$5)\n\
+            ⭐ 3 months — 600 Stars (~$12)\n\
+            ⭐ 12 months — 2000 Stars (~$40)\n\n\
             Use /settings → Subscribe".to_string()
         )
     }
@@ -372,17 +372,80 @@ Try it now ↑
                             bot.send_message(msg.chat.id, "📋 No tasks yet!\n\nSend me a message to create one.")
                                 .await?;
                         } else {
-                            for task in &tasks {
-                                let due = task.due_at.as_ref()
-                                    .map(|d| format!("\n📅 {}", d))
-                                    .unwrap_or_default();
+                            // Check for stale tasks first
+                            let stale_tasks = Task::find_stale(&pool, user.id, 7).await.unwrap_or_default();
+                            if !stale_tasks.is_empty() {
+                                let stale_keyboard = InlineKeyboardMarkup::new(vec![
+                                    vec![
+                                        InlineKeyboardButton::callback("📋 Review", "stale:review"),
+                                        InlineKeyboardButton::callback("✓ Keep all", "stale:keep"),
+                                    ]
+                                ]);
 
                                 bot.send_message(
                                     msg.chat.id,
-                                    format!("📝 {}{}", task.title, due),
+                                    format!("⚠️ {} task{} not updated in 7+ days",
+                                        stale_tasks.len(),
+                                        if stale_tasks.len() == 1 { "" } else { "s" }
+                                    ),
                                 )
-                                .reply_markup(task_keyboard(task.id))
+                                .reply_markup(stale_keyboard)
                                 .await?;
+                            }
+
+                            // Group tasks by first tag
+                            let mut grouped: std::collections::HashMap<String, Vec<&Task>> = std::collections::HashMap::new();
+                            for task in &tasks {
+                                let tag = task.tags.as_ref()
+                                    .and_then(|t| t.split(',').next())
+                                    .map(|s| s.trim().to_string())
+                                    .filter(|s| !s.is_empty())
+                                    .unwrap_or_else(|| "other".to_string());
+                                grouped.entry(tag).or_default().push(task);
+                            }
+
+                            // Sort tags: known tags first, "other" last
+                            let mut tags: Vec<_> = grouped.keys().cloned().collect();
+                            tags.sort_by(|a, b| {
+                                if a == "other" { std::cmp::Ordering::Greater }
+                                else if b == "other" { std::cmp::Ordering::Less }
+                                else { a.cmp(b) }
+                            });
+
+                            // Send grouped tasks
+                            for tag in tags {
+                                if let Some(tag_tasks) = grouped.get(&tag) {
+                                    let tag_emoji = match tag.as_str() {
+                                        "work" => "💼",
+                                        "personal" => "👤",
+                                        "shopping" => "🛒",
+                                        "health" => "❤️",
+                                        "home" => "🏠",
+                                        "finance" => "💰",
+                                        "other" => "📦",
+                                        _ => "🏷️",
+                                    };
+
+                                    // Header with tag
+                                    bot.send_message(
+                                        msg.chat.id,
+                                        format!("{} {} ({})", tag_emoji, tag.to_uppercase(), tag_tasks.len()),
+                                    ).await?;
+
+                                    // Tasks in this group
+                                    for task in tag_tasks {
+                                        let due = task.due_at.as_ref()
+                                            .map(|d| format!("\n📅 {}", d))
+                                            .unwrap_or_default();
+
+                                        bot.send_message(
+                                            msg.chat.id,
+                                            format!("  📝 {}{}", task.title, due),
+                                        )
+                                        .reply_markup(task_keyboard(task.id))
+                                        .await?;
+                                    }
+                                }
                             }
                         }
                     } else {
@@ -860,6 +923,15 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                         ).await;
                                         return Ok(());
                                     }
+                                    // Duplicate confirmation - ignore voice, use buttons
+                                    PendingEdit::ConfirmDuplicate(_) => {
+                                        let _ = bot.edit_message_text(
+                                            msg.chat.id,
+                                            progress_msg.id,
+                                            "⚠️ Please use the buttons above to confirm or cancel.",
+                                        ).await;
+                                        return Ok(());
+                                    }
                                 }
                             }
 
@@ -889,7 +961,38 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                         return Ok(());
                                     }
 
-                                    match Task::create(&pool, user.id, &parsed.title, None, parsed.due_at.as_deref()).await {
+                                    let tags_str = if parsed.tags.is_empty() { None } else { Some(parsed.tags.join(",")) };
+
+                                    // Check for duplicate
+                                    if let Some(existing) = Task::find_similar(&pool, user.id, &parsed.title).await {
+                                        // Store pending task and ask for confirmation
+                                        context.set_pending_edit(user.id, PendingEdit::ConfirmDuplicate(PendingTask {
+                                            title: parsed.title.clone(),
+                                            due_at: parsed.due_at.clone(),
+                                            tags: tags_str.clone(),
+                                        }));
+
+                                        let keyboard = InlineKeyboardMarkup::new(vec![
+                                            vec![
+                                                InlineKeyboardButton::callback("✅ Create anyway", "dup:create"),
+                                                InlineKeyboardButton::callback("❌ Cancel", "dup:cancel"),
+                                            ]
+                                        ]);
+
+                                        let _ = bot.edit_message_text(
+                                            msg.chat.id,
+                                            progress_msg.id,
+                                            format!(
+                                                "⚠️ Similar task exists:\n\n📝 \"{}\"\n\nCreate \"{}\" anyway?",
+                                                existing.title, parsed.title
+                                            ),
+                                        )
+                                        .reply_markup(keyboard)
+                                        .await;
+                                        return Ok(());
+                                    }
+
+                                    match Task::create(&pool, user.id, &parsed.title, None, parsed.due_at.as_deref(), tags_str.as_deref()).await {
                                         Ok(task) => {
                                             if task.due_at.is_some() {
                                                 let _ = Task::set_reminder_from_due(&pool, task.id).await;
@@ -1022,7 +1125,7 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                         return Ok(());
                                     }
 
-                                    match Task::create(&pool, user.id, &transcript, None, None).await {
+                                    match Task::create(&pool, user.id, &transcript, None, None, None).await {
                                         Ok(task) => {
                                             bot.edit_message_text(
                                                 msg.chat.id,
@@ -1366,6 +1469,14 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                             }
                             return Ok(());
                         }
+                        PendingEdit::ConfirmDuplicate(_) => {
+                            // Waiting for button press, ignore text
+                            bot.send_message(
+                                msg.chat.id,
+                                "⚠️ Please use the buttons above to confirm or cancel.",
+                            ).await?;
+                            return Ok(());
+                        }
                     }
                 }
 
@@ -1406,7 +1517,36 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                 return Ok(());
                             }
 
-                            match Task::create(&pool, user.id, &parsed.title, None, parsed.due_at.as_deref()).await {
+                            let tags_str = if parsed.tags.is_empty() { None } else { Some(parsed.tags.join(",")) };
+
+                            // Check for duplicate
+                            if let Some(existing) = Task::find_similar(&pool, user.id, &parsed.title).await {
+                                context.set_pending_edit(user.id, PendingEdit::ConfirmDuplicate(PendingTask {
+                                    title: parsed.title.clone(),
+                                    due_at: parsed.due_at.clone(),
+                                    tags: tags_str.clone(),
+                                }));
+
+                                let keyboard = InlineKeyboardMarkup::new(vec![
+                                    vec![
+                                        InlineKeyboardButton::callback("✅ Create anyway", "dup:create"),
+                                        InlineKeyboardButton::callback("❌ Cancel", "dup:cancel"),
+                                    ]
+                                ]);
+
+                                bot.send_message(
+                                    msg.chat.id,
+                                    format!(
+                                        "⚠️ Similar task exists:\n\n📝 \"{}\"\n\nCreate \"{}\" anyway?",
+                                        existing.title, parsed.title
+                                    ),
+                                )
+                                .reply_markup(keyboard)
+                                .await?;
+                                return Ok(());
+                            }
+
+                            match Task::create(&pool, user.id, &parsed.title, None, parsed.due_at.as_deref(), tags_str.as_deref()).await {
                                 Ok(task) => {
                                     if task.due_at.is_some() {
                                         let _ = Task::set_reminder_from_due(&pool, task.id).await;
@@ -1545,7 +1685,7 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                 return Ok(());
                             }
 
-                            match Task::create(&pool, user.id, text, None, None).await {
+                            match Task::create(&pool, user.id, text, None, None, None).await {
                                 Ok(task) => {
                                     bot.send_message(
                                         msg.chat.id,
@@ -1579,7 +1719,7 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                         return Ok(());
                     }
 
-                    match Task::create(&pool, user.id, text, None, None).await {
+                    match Task::create(&pool, user.id, text, None, None, None).await {
                         Ok(task) => {
                             bot.send_message(
                                 msg.chat.id,
@@ -1781,6 +1921,145 @@ pub async fn callback_handler(
         }
 
         bot.answer_callback_query(q.id).await?;
+    } else if data == "dup:create" {
+        // User confirmed creating duplicate task
+        let telegram_id = q.from.id.0 as i64;
+        if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
+            if let Some(PendingEdit::ConfirmDuplicate(pending)) = context.take_pending_edit(user.id) {
+                match Task::create(&pool, user.id, &pending.title, None, pending.due_at.as_deref(), pending.tags.as_deref()).await {
+                    Ok(task) => {
+                        if task.due_at.is_some() {
+                            let _ = Task::set_reminder_from_due(&pool, task.id).await;
+                        }
+
+                        let due_str = task.due_at.as_ref()
+                            .map(|d| format!("\n📅 {}", d))
+                            .unwrap_or_default();
+
+                        if let Some(msg) = q.message {
+                            bot.edit_message_text(
+                                msg.chat().id,
+                                msg.id(),
+                                format!("✅ Added!\n\n📝 {}{}", task.title, due_str),
+                            )
+                            .reply_markup(task_keyboard(task.id))
+                            .await?;
+                        }
+
+                        bot.answer_callback_query(q.id).text("✅ Created").await?;
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to create task: {}", e);
+                        if let Some(msg) = q.message {
+                            bot.edit_message_text(
+                                msg.chat().id,
+                                msg.id(),
+                                "❌ Couldn't create task",
+                            ).await?;
+                        }
+                        bot.answer_callback_query(q.id).text("❌ Failed").await?;
+                    }
+                }
+            } else {
+                bot.answer_callback_query(q.id).text("Session expired").await?;
+            }
+        }
+    } else if data == "dup:cancel" {
+        // User cancelled duplicate task creation
+        let telegram_id = q.from.id.0 as i64;
+        if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
+            context.take_pending_edit(user.id); // Clear pending
+        }
+
+        if let Some(msg) = q.message {
+            bot.edit_message_text(
+                msg.chat().id,
+                msg.id(),
+                "↩️ Cancelled",
+            ).await?;
+        }
+
+        bot.answer_callback_query(q.id).text("Cancelled").await?;
+    } else if data == "stale:review" {
+        // Show stale tasks one by one for review
+        let telegram_id = q.from.id.0 as i64;
+        if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
+            let stale_tasks = Task::find_stale(&pool, user.id, 7).await.unwrap_or_default();
+
+            if let Some(msg) = &q.message {
+                if stale_tasks.is_empty() {
+                    bot.edit_message_text(
+                        msg.chat().id,
+                        msg.id(),
+                        "✅ No stale tasks!",
+                    ).await?;
+                } else {
+                    bot.edit_message_text(
+                        msg.chat().id,
+                        msg.id(),
+                        format!("📋 Reviewing {} stale task{}...", stale_tasks.len(), if stale_tasks.len() == 1 { "" } else { "s" }),
+                    ).await?;
+
+                    // Show each stale task with actions
+                    for task in stale_tasks {
+                        let keyboard = InlineKeyboardMarkup::new(vec![
+                            vec![
+                                InlineKeyboardButton::callback("✅ Keep", format!("stale:touch:{}", task.id)),
+                                InlineKeyboardButton::callback("✓ Done", format!("done:{}", task.id)),
+                                InlineKeyboardButton::callback("🗑 Delete", format!("delete:{}", task.id)),
+                            ]
+                        ]);
+
+                        bot.send_message(
+                            msg.chat().id,
+                            format!("🕐 {}\n\n📅 Last updated: {}", task.title, task.updated_at),
+                        )
+                        .reply_markup(keyboard)
+                        .await?;
+                    }
+                }
+            }
+        }
+
+        bot.answer_callback_query(q.id).await?;
+    } else if data == "stale:keep" {
+        // Touch all stale tasks to mark them as reviewed
+        let telegram_id = q.from.id.0 as i64;
+        if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
+            let stale_tasks = Task::find_stale(&pool, user.id, 7).await.unwrap_or_default();
+            let count = stale_tasks.len();
+
+            for task in stale_tasks {
+                let _ = Task::touch(&pool, task.id).await;
+            }
+
+            if let Some(msg) = q.message {
+                bot.edit_message_text(
+                    msg.chat().id,
+                    msg.id(),
+                    format!("✅ Kept {} task{}. They won't appear as stale for 7 more days.", count, if count == 1 { "" } else { "s" }),
+                ).await?;
+            }
+        }
+
+        bot.answer_callback_query(q.id).text("✅ Kept all").await?;
+    } else if let Some(task_id_str) = data.strip_prefix("stale:touch:") {
+        // Touch single stale task
+        if let Ok(task_id) = task_id_str.parse::<i64>() {
+            if let Some(task) = Task::find_by_id(&pool, task_id).await {
+                let _ = Task::touch(&pool, task_id).await;
+
+                if let Some(msg) = q.message {
+                    bot.edit_message_text(
+                        msg.chat().id,
+                        msg.id(),
+                        format!("✅ Kept: {}", task.title),
+                    ).await?;
+                }
+
+                bot.answer_callback_query(q.id).text("✅ Kept").await?;
+            }
+        }
     } else if data == "settings:timezone" {
         // Show timezone options with auto-detect
         let tz_keyboard = InlineKeyboardMarkup::new(vec![
@@ -2367,13 +2646,13 @@ pub async fn callback_handler(
         // Show subscription options
         let subscribe_keyboard = InlineKeyboardMarkup::new(vec![
             vec![
-                InlineKeyboardButton::callback("⭐ 1 month — 150 Stars", "buy:1"),
+                InlineKeyboardButton::callback("⭐ 1 month — 250 Stars", "buy:1"),
             ],
             vec![
-                InlineKeyboardButton::callback("⭐ 3 months — 400 Stars (save $1)", "buy:3"),
+                InlineKeyboardButton::callback("⭐ 3 months — 600 Stars (save $3)", "buy:3"),
             ],
             vec![
-                InlineKeyboardButton::callback("⭐ 12 months — 1200 Stars (save $11)", "buy:12"),
+                InlineKeyboardButton::callback("⭐ 12 months — 2000 Stars (save $20)", "buy:12"),
             ],
             vec![
                 InlineKeyboardButton::callback("↩️ Back", "settings:back"),

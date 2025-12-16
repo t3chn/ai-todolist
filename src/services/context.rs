@@ -18,6 +18,14 @@ pub struct ProposedEdit {
     pub new_due_at: Option<String>,
 }
 
+/// Pending task creation (for duplicate confirmation)
+#[derive(Debug, Clone)]
+pub struct PendingTask {
+    pub title: String,
+    pub due_at: Option<String>,
+    pub tags: Option<String>,
+}
+
 /// Pending edit state for a user
 #[derive(Debug, Clone)]
 pub enum PendingEdit {
@@ -26,6 +34,7 @@ pub enum PendingEdit {
     Reminder(i64),                 // task_id - waiting for custom reminder time
     Timezone,                      // waiting for city name for timezone
     Support,                       // waiting for support message
+    ConfirmDuplicate(PendingTask), // waiting for duplicate confirmation
     // Admin
     AdminSearch,                   // waiting for user search query
     AdminBroadcast(String),        // segment - waiting for broadcast message

@@ -19,7 +19,7 @@ impl RateLimits {
     pub fn paid() -> Self {
         Self {
             tasks_per_day: 100,
-            voice_per_day: 50,
+            voice_per_day: 30,  // защита от злоупотреблений
             ai_calls_per_hour: 100,
         }
     }
