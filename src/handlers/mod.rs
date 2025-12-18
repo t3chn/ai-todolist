@@ -461,13 +461,16 @@ pub async fn message_handler(
             Command::Today => {
                 if let Some(tg_user) = telegram_user {
                     if let Some(user) = User::find_by_telegram_id(&pool, tg_user.id.0 as i64).await {
+                        let lang = user.lang();
                         let tasks = Task::find_today_tasks(&pool, user.id).await.unwrap_or_default();
 
                         if tasks.is_empty() {
-                            bot.send_message(msg.chat.id, "📅 No tasks for today!\n\nSend me a task with a due date.")
+                            bot.send_message(msg.chat.id, i18n.t(lang, "tasks-today-empty"))
                                 .await?;
                         } else {
-                            bot.send_message(msg.chat.id, format!("📅 Today's tasks ({}):", tasks.len()))
+                            let mut args = FluentArgs::new();
+                            args.set("count", tasks.len() as i64);
+                            bot.send_message(msg.chat.id, i18n.t_args(lang, "tasks-today-header", &args))
                                 .await?;
 
                             for task in &tasks {
@@ -493,52 +496,46 @@ pub async fn message_handler(
             Command::Settings => {
                 if let Some(tg_user) = telegram_user {
                     if let Some(user) = User::find_by_telegram_id(&pool, tg_user.id.0 as i64).await {
+                        let lang = user.lang();
                         let show_subscribe = !user.has_active_subscription()
                             || user.trial_days_remaining().is_some();
 
                         let mut keyboard_rows = vec![
                             vec![
-                                InlineKeyboardButton::callback("🌍 Timezone", "settings:timezone"),
-                                InlineKeyboardButton::callback("⏰ Brief time", "settings:brief_time"),
+                                InlineKeyboardButton::callback(&i18n.t(lang, "btn-timezone"), "settings:timezone"),
+                                InlineKeyboardButton::callback(&i18n.t(lang, "btn-brief-time"), "settings:brief_time"),
                             ],
                             vec![
-                                InlineKeyboardButton::callback("🌐 Language", "settings:language"),
-                                InlineKeyboardButton::callback("🎁 Invite friends", "settings:invite"),
+                                InlineKeyboardButton::callback(&i18n.t(lang, "btn-language"), "settings:language"),
+                                InlineKeyboardButton::callback(&i18n.t(lang, "btn-invite"), "settings:invite"),
                             ],
                         ];
 
                         if show_subscribe {
                             keyboard_rows.push(vec![
-                                InlineKeyboardButton::callback("⭐ Subscribe", "subscribe"),
+                                InlineKeyboardButton::callback(&i18n.t(lang, "btn-subscribe"), "subscribe"),
                             ]);
                         }
 
                         let settings_keyboard = InlineKeyboardMarkup::new(keyboard_rows);
 
-                        let lang_display = match user.lang() {
+                        let lang_display = match lang {
                             "ru" => "🇷🇺 Русский",
                             _ => "🇬🇧 English",
                         };
 
-                        bot.send_message(
-                            msg.chat.id,
-                            format!(
-                                "⚙️ <b>Settings</b>\n\n\
-                                📊 Status: {}\n\
-                                🌍 Timezone: {}\n\
-                                ⏰ Morning brief: {}\n\
-                                🌐 Language: {}",
-                                user.subscription_status(),
-                                user.timezone,
-                                user.morning_brief_time,
-                                lang_display
-                            ),
-                        )
+                        let mut args = FluentArgs::new();
+                        args.set("status", user.subscription_status());
+                        args.set("tz", user.timezone.clone());
+                        args.set("time", user.morning_brief_time.clone());
+                        args.set("lang", lang_display);
+
+                        bot.send_message(msg.chat.id, i18n.t_args(lang, "settings-full", &args))
                         .parse_mode(teloxide::types::ParseMode::Html)
                         .reply_markup(settings_keyboard)
                         .await?;
                     } else {
-                        bot.send_message(msg.chat.id, "Please /start first")
+                        bot.send_message(msg.chat.id, i18n.t("en", "error-start-first"))
                             .await?;
                     }
                 }
@@ -1807,25 +1804,32 @@ pub async fn callback_handler(
 
                 let telegram_id = q.from.id.0 as i64;
                 if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
+                    let lang = user.lang();
                     // Get stats
                     let completed_today = Task::count_completed_today(&pool, user.id).await;
                     let pending = Task::find_pending_by_user(&pool, user.id).await.unwrap_or_default();
                     let total_today = completed_today + pending.len() as i64;
 
                     // Celebration message
-                    let celebration = match completed_today {
-                        1 => "🎯 First one today!",
-                        2..=4 => "🔥 Keep going!",
-                        5..=9 => "⚡ On fire!",
-                        _ => "🏆 Unstoppable!",
-                    };
+                    let celebration = i18n.t(lang, match completed_today {
+                        1 => "celebrate-first",
+                        2..=4 => "celebrate-keep-going",
+                        5..=9 => "celebrate-on-fire",
+                        _ => "celebrate-unstoppable",
+                    });
 
                     // Update message with celebration
                     if let Some(msg) = &q.message {
+                        let mut args = FluentArgs::new();
+                        args.set("title", task.title.clone());
+                        args.set("done", completed_today);
+                        args.set("total", total_today);
+                        args.set("celebration", celebration);
+
                         bot.edit_message_text(
                             msg.chat().id,
                             msg.id(),
-                            format!("✅ {}\n\n📊 {}/{} today. {}", task.title, completed_today, total_today, celebration),
+                            i18n.t_args(lang, "task-completed-stats", &args),
                         )
                         .await?;
 
@@ -1836,44 +1840,46 @@ pub async fn callback_handler(
                                 .unwrap_or_default();
 
                             let next_keyboard = InlineKeyboardMarkup::new(vec![vec![
-                                InlineKeyboardButton::callback("✅ Do it", format!("done:{}", next_task.id)),
-                                InlineKeyboardButton::callback("📋 All tasks", "view_tasks".to_string()),
+                                InlineKeyboardButton::callback(&i18n.t(lang, "btn-do-it"), format!("done:{}", next_task.id)),
+                                InlineKeyboardButton::callback(&i18n.t(lang, "btn-all-tasks"), "view_tasks".to_string()),
                             ]]);
 
-                            bot.send_message(
-                                msg.chat().id,
-                                format!("🎯 Next: {}{}", next_task.title, due_str),
-                            )
+                            let mut args = FluentArgs::new();
+                            args.set("title", next_task.title.clone());
+                            args.set("due", due_str);
+                            bot.send_message(msg.chat().id, i18n.t_args(lang, "task-next", &args))
                             .reply_markup(next_keyboard)
                             .await?;
                         } else {
-                            bot.send_message(
-                                msg.chat().id,
-                                format!("🎉 All done! {} tasks completed today.", completed_today),
-                            )
+                            let mut args = FluentArgs::new();
+                            args.set("count", completed_today);
+                            bot.send_message(msg.chat().id, i18n.t_args(lang, "task-all-done", &args))
                             .await?;
                         }
                     }
                 }
 
-                bot.answer_callback_query(q.id).text("✅ Done!").await?;
+                bot.answer_callback_query(q.id).text("✅").await?;
             }
         }
     } else if let Some(task_id_str) = data.strip_prefix("delete:") {
         // Show confirmation dialog instead of deleting immediately
         if let Ok(task_id) = task_id_str.parse::<i64>() {
             if let Some(task) = Task::find_by_id(&pool, task_id).await {
+                let telegram_id = q.from.id.0 as i64;
+                let lang = User::find_by_telegram_id(&pool, telegram_id).await
+                    .map(|u| u.lang().to_string())
+                    .unwrap_or_else(|| "en".to_string());
+
                 if let Some(msg) = q.message {
                     let confirm_keyboard = InlineKeyboardMarkup::new(vec![vec![
-                        InlineKeyboardButton::callback("🗑 Yes, delete", format!("confirm_delete:{}", task_id)),
-                        InlineKeyboardButton::callback("↩️ Cancel", format!("cancel_delete:{}", task_id)),
+                        InlineKeyboardButton::callback(&i18n.t(&lang, "btn-yes-delete"), format!("confirm_delete:{}", task_id)),
+                        InlineKeyboardButton::callback(&i18n.t(&lang, "btn-cancel"), format!("cancel_delete:{}", task_id)),
                     ]]);
 
-                    bot.edit_message_text(
-                        msg.chat().id,
-                        msg.id(),
-                        format!("⚠️ Delete \"{}\"?", task.title),
-                    )
+                    let mut args = FluentArgs::new();
+                    args.set("title", task.title.clone());
+                    bot.edit_message_text(msg.chat().id, msg.id(), i18n.t_args(&lang, "task-delete-confirm", &args))
                     .reply_markup(confirm_keyboard)
                     .await?;
                 }
@@ -1887,22 +1893,34 @@ pub async fn callback_handler(
             if let Some(task) = Task::find_by_id(&pool, task_id).await {
                 let _ = Task::delete(&pool, task_id).await;
 
+                let telegram_id = q.from.id.0 as i64;
+                let lang = User::find_by_telegram_id(&pool, telegram_id).await
+                    .map(|u| u.lang().to_string())
+                    .unwrap_or_else(|| "en".to_string());
+
                 if let Some(msg) = q.message {
+                    let mut args = FluentArgs::new();
+                    args.set("title", task.title.clone());
                     bot.edit_message_text(
                         msg.chat().id,
                         msg.id(),
-                        format!("🗑 Deleted: {}", task.title),
+                        i18n.t_args(&lang, "task-deleted-msg", &args),
                     )
                     .await?;
                 }
 
-                bot.answer_callback_query(q.id).text("🗑 Deleted").await?;
+                bot.answer_callback_query(q.id).text("🗑").await?;
             }
         }
     } else if let Some(task_id_str) = data.strip_prefix("cancel_delete:") {
         // Restore original task view
         if let Ok(task_id) = task_id_str.parse::<i64>() {
             if let Some(task) = Task::find_by_id(&pool, task_id).await {
+                let telegram_id = q.from.id.0 as i64;
+                let lang = User::find_by_telegram_id(&pool, telegram_id).await
+                    .map(|u| u.lang().to_string())
+                    .unwrap_or_else(|| "en".to_string());
+
                 if let Some(msg) = q.message {
                     let due_str = task.due_at.as_ref()
                         .map(|d| format!("\n📅 {}", d))
@@ -1917,7 +1935,7 @@ pub async fn callback_handler(
                     .await?;
                 }
 
-                bot.answer_callback_query(q.id).text("Cancelled").await?;
+                bot.answer_callback_query(q.id).text(&i18n.t(&lang, "task-cancelled")).await?;
             }
         }
     } else if let Some(snooze_data) = data.strip_prefix("snooze:") {
@@ -1928,24 +1946,34 @@ pub async fn callback_handler(
                 if let Some(task) = Task::find_by_id(&pool, task_id).await {
                     let _ = Task::snooze_reminder(&pool, task_id, minutes).await;
 
-                    let snooze_text = if minutes == 60 {
-                        "1 hour"
+                    let telegram_id = q.from.id.0 as i64;
+                    let lang = User::find_by_telegram_id(&pool, telegram_id).await
+                        .map(|u| u.lang().to_string())
+                        .unwrap_or_else(|| "en".to_string());
+
+                    let snooze_key = if minutes == 60 {
+                        "snooze-1h"
                     } else if minutes == 1440 {
-                        "tomorrow"
+                        "snooze-tomorrow"
                     } else {
-                        "later"
+                        "snooze-later"
                     };
+                    let snooze_text = i18n.t(&lang, snooze_key);
 
                     if let Some(msg) = q.message {
+                        let mut args = FluentArgs::new();
+                        args.set("title", task.title.clone());
+                        args.set("when", snooze_text.clone());
                         bot.edit_message_text(
                             msg.chat().id,
                             msg.id(),
-                            format!("⏰ Snoozed: {}\n\nI'll remind you {}.", task.title, snooze_text),
+                            i18n.t_args(&lang, "task-snoozed", &args),
                         )
+                        .parse_mode(teloxide::types::ParseMode::Html)
                         .await?;
                     }
 
-                    bot.answer_callback_query(q.id).text(format!("⏰ Snoozed for {}", snooze_text)).await?;
+                    bot.answer_callback_query(q.id).text(format!("⏰ {}", snooze_text)).await?;
                 }
             }
         }
@@ -1953,11 +1981,12 @@ pub async fn callback_handler(
         // Show all pending tasks
         let telegram_id = q.from.id.0 as i64;
         if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
+            let lang = user.lang();
             let tasks = Task::find_pending_by_user(&pool, user.id).await.unwrap_or_default();
 
             if let Some(msg) = &q.message {
                 if tasks.is_empty() {
-                    bot.send_message(msg.chat().id, "📋 No tasks yet!\n\nSend me a message to create one.")
+                    bot.send_message(msg.chat().id, i18n.t(lang, "tasks-empty"))
                         .await?;
                 } else {
                     for task in &tasks {
@@ -2344,48 +2373,45 @@ pub async fn callback_handler(
         // Back to settings - redirect to settings handler
         let telegram_id = q.from.id.0 as i64;
         if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
+            let lang = user.lang();
             let show_subscribe = !user.has_active_subscription()
                 || user.trial_days_remaining().is_some();
 
             let mut keyboard_rows = vec![
                 vec![
-                    InlineKeyboardButton::callback("🌍 Timezone", "settings:timezone"),
-                    InlineKeyboardButton::callback("⏰ Brief time", "settings:brief_time"),
+                    InlineKeyboardButton::callback(&i18n.t(lang, "btn-timezone"), "settings:timezone"),
+                    InlineKeyboardButton::callback(&i18n.t(lang, "btn-brief-time"), "settings:brief_time"),
                 ],
                 vec![
-                    InlineKeyboardButton::callback("🌐 Language", "settings:language"),
-                    InlineKeyboardButton::callback("🎁 Invite friends", "settings:invite"),
+                    InlineKeyboardButton::callback(&i18n.t(lang, "btn-language"), "settings:language"),
+                    InlineKeyboardButton::callback(&i18n.t(lang, "btn-invite"), "settings:invite"),
                 ],
             ];
 
             if show_subscribe {
                 keyboard_rows.push(vec![
-                    InlineKeyboardButton::callback("⭐ Subscribe", "subscribe"),
+                    InlineKeyboardButton::callback(&i18n.t(lang, "btn-subscribe"), "subscribe"),
                 ]);
             }
 
             let settings_keyboard = InlineKeyboardMarkup::new(keyboard_rows);
 
-            let lang_display = match user.lang() {
+            let lang_display = match lang {
                 "ru" => "🇷🇺 Русский",
                 _ => "🇬🇧 English",
             };
+
+            let mut args = FluentArgs::new();
+            args.set("status", user.subscription_status());
+            args.set("tz", user.timezone.clone());
+            args.set("time", user.morning_brief_time.clone());
+            args.set("lang", lang_display);
 
             if let Some(msg) = &q.message {
                 bot.edit_message_text(
                     msg.chat().id,
                     msg.id(),
-                    format!(
-                        "⚙️ <b>Settings</b>\n\n\
-                        📊 Status: {}\n\
-                        🌍 Timezone: {}\n\
-                        ⏰ Morning brief: {}\n\
-                        🌐 Language: {}",
-                        user.subscription_status(),
-                        user.timezone,
-                        user.morning_brief_time,
-                        lang_display
-                    ),
+                    i18n.t_args(lang, "settings-full", &args),
                 )
                 .parse_mode(teloxide::types::ParseMode::Html)
                 .reply_markup(settings_keyboard)
@@ -2398,28 +2424,23 @@ pub async fn callback_handler(
         // Show invite/referral info
         let telegram_id = q.from.id.0 as i64;
         if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
+            let lang = user.lang();
             let referral_code = User::ensure_referral_code(&pool, user.id).await.ok();
             let (referral_count, bonus_days) = user.referral_stats();
 
             let code = referral_code.as_deref().unwrap_or("");
-            let invite_text = format!(
-                "🎁 <b>Invite Friends</b>\n\n\
-                Share your link:\n\
-                <code>https://t.me/{}?start={}</code>\n\n\
-                ✨ You both get +7 days free!\n\n\
-                📊 Invited: {} · Bonus: {} days",
-                BOT_USERNAME,
-                code,
-                referral_count,
-                bonus_days
-            );
+            let mut args = FluentArgs::new();
+            args.set("bot", BOT_USERNAME);
+            args.set("code", code.to_string());
+            args.set("count", referral_count);
+            args.set("bonus", bonus_days);
 
             let invite_keyboard = InlineKeyboardMarkup::new(vec![
-                vec![InlineKeyboardButton::callback("↩️ Back", "settings:back")],
+                vec![InlineKeyboardButton::callback(&i18n.t(lang, "btn-back"), "settings:back")],
             ]);
 
             if let Some(msg) = &q.message {
-                bot.edit_message_text(msg.chat().id, msg.id(), invite_text)
+                bot.edit_message_text(msg.chat().id, msg.id(), i18n.t_args(lang, "invite-full", &args))
                     .parse_mode(teloxide::types::ParseMode::Html)
                     .reply_markup(invite_keyboard)
                     .await?;
@@ -2431,48 +2452,45 @@ pub async fn callback_handler(
         // Show settings menu
         let telegram_id = q.from.id.0 as i64;
         if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
+            let lang = user.lang();
             let show_subscribe = !user.has_active_subscription()
                 || user.trial_days_remaining().is_some();
 
             let mut keyboard_rows = vec![
                 vec![
-                    InlineKeyboardButton::callback("🌍 Timezone", "settings:timezone"),
-                    InlineKeyboardButton::callback("⏰ Brief time", "settings:brief_time"),
+                    InlineKeyboardButton::callback(&i18n.t(lang, "btn-timezone"), "settings:timezone"),
+                    InlineKeyboardButton::callback(&i18n.t(lang, "btn-brief-time"), "settings:brief_time"),
                 ],
                 vec![
-                    InlineKeyboardButton::callback("🌐 Language", "settings:language"),
-                    InlineKeyboardButton::callback("🎁 Invite friends", "settings:invite"),
+                    InlineKeyboardButton::callback(&i18n.t(lang, "btn-language"), "settings:language"),
+                    InlineKeyboardButton::callback(&i18n.t(lang, "btn-invite"), "settings:invite"),
                 ],
             ];
 
             if show_subscribe {
                 keyboard_rows.push(vec![
-                    InlineKeyboardButton::callback("⭐ Subscribe", "subscribe"),
+                    InlineKeyboardButton::callback(&i18n.t(lang, "btn-subscribe"), "subscribe"),
                 ]);
             }
 
             let settings_keyboard = InlineKeyboardMarkup::new(keyboard_rows);
 
-            let lang_display = match user.lang() {
+            let lang_display = match lang {
                 "ru" => "🇷🇺 Русский",
                 _ => "🇬🇧 English",
             };
+
+            let mut args = FluentArgs::new();
+            args.set("status", user.subscription_status());
+            args.set("tz", user.timezone.clone());
+            args.set("time", user.morning_brief_time.clone());
+            args.set("lang", lang_display);
 
             if let Some(msg) = &q.message {
                 bot.edit_message_text(
                     msg.chat().id,
                     msg.id(),
-                    format!(
-                        "⚙️ <b>Settings</b>\n\n\
-                        📊 Status: {}\n\
-                        🌍 Timezone: {}\n\
-                        ⏰ Morning brief: {}\n\
-                        🌐 Language: {}",
-                        user.subscription_status(),
-                        user.timezone,
-                        user.morning_brief_time,
-                        lang_display
-                    ),
+                    i18n.t_args(lang, "settings-full", &args),
                 )
                 .parse_mode(teloxide::types::ParseMode::Html)
                 .reply_markup(settings_keyboard)

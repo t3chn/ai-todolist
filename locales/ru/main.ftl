@@ -82,6 +82,12 @@ settings-status = 📊 Статус: { $status }
 settings-timezone = 🌍 Часовой пояс: { $tz }
 settings-brief-time = ⏰ Утренний дайджест: { $time }
 settings-language = 🌐 Язык: { $lang }
+settings-full = ⚙️ <b>Настройки</b>
+
+    📊 Статус: { $status }
+    🌍 Часовой пояс: { $tz }
+    ⏰ Утренний дайджест: { $time }
+    🌐 Язык: { $lang }
 
 settings-timezone-title = 🌍 <b>Выбери часовой пояс:</b>
 settings-brief-title = ⏰ <b>Время утреннего дайджеста:</b>
@@ -132,6 +138,14 @@ invite-link = Твоя реферальная ссылка:
 invite-stats = 👥 Приглашено: <b>{ $count }</b>
     🎁 Бонусных дней: <b>{ $bonus }</b>
 invite-share = 📲 Поделиться:
+invite-full = 🎁 <b>Пригласи друзей</b>
+
+    Твоя ссылка:
+    <code>https://t.me/{ $bot }?start={ $code }</code>
+
+    ✨ Вы оба получите +7 дней бесплатно!
+
+    👥 Приглашено: { $count } · Бонус: { $bonus } дней
 
 # === Support ===
 support-prompt = 📮 <b>Связаться с поддержкой</b>
@@ -157,6 +171,28 @@ duplicate-warning = ⚠️ Похожая задача уже есть:
 # === Celebration ===
 celebration-streak = 🔥 <b>{ $count } задач подряд!</b> Так держать!
 celebration-milestone = 🏆 <b>Веха!</b> Ты выполнил { $count } задач!
+celebrate-first = 🎯 Первая задача сделана!
+celebrate-keep-going = 👍 Так держать!
+celebrate-on-fire = 🔥 Ты в ударе!
+celebrate-unstoppable = 💪 Неостановим!
+
+# === Task Completion ===
+task-completed-stats = ✅ <b>{ $title }</b>
+
+    { $celebration }
+    📊 { $done }/{ $total } сделано сегодня
+task-next = 📝 Далее: <b>{ $title }</b>{ $due }
+task-all-done = 🎉 Всё сделано! Ты выполнил { $count } { $count ->
+    [one] задачу
+    [few] задачи
+    *[other] задач
+} сегодня!
+task-delete-confirm = 🗑 Удалить <b>{ $title }</b>?
+task-snoozed = ⏰ Отложено: <b>{ $title }</b>
+
+    Напомню { $when }.
+task-deleted-msg = 🗑 Удалено: { $title }
+task-cancelled = Отменено
 
 # === Voice ===
 voice-processing = 🎤 Обрабатываю голосовое сообщение...
@@ -200,11 +236,18 @@ btn-create-anyway = ✅ Создать всё равно
 btn-cancel = ❌ Отмена
 btn-yes = ✅ Да
 btn-no = ❌ Нет
+btn-do-it = ✅ Сделать
+btn-all-tasks = 📋 Все задачи
+btn-yes-delete = 🗑 Да, удалить
+snooze-1h = 1 час
+snooze-tomorrow = завтра
+snooze-later = позже
 
 # === Errors ===
 error-generic = ❌ Что-то пошло не так. Попробуй ещё раз.
 error-not-found = ❌ Задача не найдена.
 error-subscription-required = ⭐ Для этой функции нужна подписка.
+error-start-first = Сначала нажми /start
 
 # === Admin ===
 admin-title = 🔧 <b>Панель администратора</b>

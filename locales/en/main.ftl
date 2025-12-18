@@ -80,6 +80,12 @@ settings-status = 📊 Status: { $status }
 settings-timezone = 🌍 Timezone: { $tz }
 settings-brief-time = ⏰ Morning brief: { $time }
 settings-language = 🌐 Language: { $lang }
+settings-full = ⚙️ <b>Settings</b>
+
+    📊 Status: { $status }
+    🌍 Timezone: { $tz }
+    ⏰ Morning brief: { $time }
+    🌐 Language: { $lang }
 
 settings-timezone-title = 🌍 <b>Select timezone:</b>
 settings-brief-title = ⏰ <b>Morning brief time:</b>
@@ -127,6 +133,14 @@ invite-link = Your referral link:
 invite-stats = 👥 Invited: <b>{ $count }</b>
     🎁 Bonus days: <b>{ $bonus }</b>
 invite-share = 📲 Share:
+invite-full = 🎁 <b>Invite Friends</b>
+
+    Share your link:
+    <code>https://t.me/{ $bot }?start={ $code }</code>
+
+    ✨ You both get +7 days free!
+
+    👥 Invited: { $count } · Bonus: { $bonus } days
 
 # === Support ===
 support-prompt = 📮 <b>Contact Support</b>
@@ -151,6 +165,27 @@ duplicate-warning = ⚠️ Similar task exists:
 # === Celebration ===
 celebration-streak = 🔥 <b>{ $count }-task streak!</b> Keep it up!
 celebration-milestone = 🏆 <b>Milestone!</b> You've completed { $count } tasks!
+celebrate-first = 🎯 First task done!
+celebrate-keep-going = 👍 Keep going!
+celebrate-on-fire = 🔥 On fire!
+celebrate-unstoppable = 💪 Unstoppable!
+
+# === Task Completion ===
+task-completed-stats = ✅ <b>{ $title }</b>
+
+    { $celebration }
+    📊 { $done }/{ $total } done today
+task-next = 📝 Next: <b>{ $title }</b>{ $due }
+task-all-done = 🎉 All done! You completed { $count } { $count ->
+    [one] task
+    *[other] tasks
+} today!
+task-delete-confirm = 🗑 Delete <b>{ $title }</b>?
+task-snoozed = ⏰ Snoozed: <b>{ $title }</b>
+
+    I'll remind you { $when }.
+task-deleted-msg = 🗑 Deleted: { $title }
+task-cancelled = Cancelled
 
 # === Voice ===
 voice-processing = 🎤 Processing voice message...
@@ -194,11 +229,18 @@ btn-create-anyway = ✅ Create anyway
 btn-cancel = ❌ Cancel
 btn-yes = ✅ Yes
 btn-no = ❌ No
+btn-do-it = ✅ Do it
+btn-all-tasks = 📋 All tasks
+btn-yes-delete = 🗑 Yes, delete
+snooze-1h = 1 hour
+snooze-tomorrow = tomorrow
+snooze-later = later
 
 # === Errors ===
 error-generic = ❌ Something went wrong. Please try again.
 error-not-found = ❌ Task not found.
 error-subscription-required = ⭐ Subscription required to use this feature.
+error-start-first = Please /start first
 
 # === Admin ===
 admin-title = 🔧 <b>Admin Panel</b>
