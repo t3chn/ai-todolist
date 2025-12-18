@@ -186,6 +186,53 @@ task-snoozed = ⏰ Snoozed: <b>{ $title }</b>
     I'll remind you { $when }.
 task-deleted-msg = 🗑 Deleted: { $title }
 task-cancelled = Cancelled
+task-added = ✅ Added!
+
+    📝 { $title }{ $due }
+task-create-failed = ❌ Couldn't create task
+session-expired = Session expired
+
+# === Stale Tasks ===
+stale-no-tasks = ✅ No stale tasks!
+stale-reviewing = 📋 Reviewing { $count } stale { $count ->
+    [one] task
+    *[other] tasks
+}...
+stale-task-item = 🕐 { $title }
+
+    📅 Last updated: { $updated }
+stale-kept-all = ✅ Kept { $count } { $count ->
+    [one] task
+    *[other] tasks
+}. They won't appear as stale for 7 more days.
+stale-kept-one = ✅ Kept: { $title }
+btn-keep = ✅ Keep
+btn-review = 📋 Review
+btn-keep-all = ✓ Keep all
+
+# === Timezone ===
+tz-select-title = 🌍 Select your timezone:
+
+    📍 Auto-detect uses your location
+    🏙 Type city lets you enter any city
+tz-auto-prompt = 📍 Tap the button below to share your location.
+
+    I'll detect your timezone automatically.
+tz-city-prompt = 🏙 Type your city name:
+
+    Examples: Moscow, New York, Tokyo, Dubai
+tz-updated = ✅ Timezone set to: { $tz }
+btn-auto-detect = 📍 Auto-detect
+btn-type-city = 🏙 Type city
+
+# === Brief Time ===
+brief-select-title = ⏰ Select morning brief time:
+brief-updated = ✅ Morning brief time set to: { $time }
+
+# === Language ===
+lang-select-title = 🌐 Select language / Выберите язык:
+lang-updated-en = ✅ Language changed to English
+lang-updated-ru = ✅ Язык изменён на Русский
 
 # === Voice ===
 voice-processing = 🎤 Processing voice message...

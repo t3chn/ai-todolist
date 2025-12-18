@@ -2010,6 +2010,7 @@ pub async fn callback_handler(
         // User confirmed creating duplicate task
         let telegram_id = q.from.id.0 as i64;
         if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
+            let lang = user.lang().to_string();
             if let Some(PendingEdit::ConfirmDuplicate(pending)) = context.take_pending_edit(user.id) {
                 match Task::create(&pool, user.id, &pending.title, None, pending.due_at.as_deref(), pending.tags.as_deref()).await {
                     Ok(task) => {
@@ -2022,16 +2023,19 @@ pub async fn callback_handler(
                             .unwrap_or_default();
 
                         if let Some(msg) = q.message {
+                            let mut args = FluentArgs::new();
+                            args.set("title", task.title.clone());
+                            args.set("due", due_str);
                             bot.edit_message_text(
                                 msg.chat().id,
                                 msg.id(),
-                                format!("✅ Added!\n\n📝 {}{}", task.title, due_str),
+                                i18n.t_args(&lang, "task-added", &args),
                             )
                             .reply_markup(task_keyboard(task.id))
                             .await?;
                         }
 
-                        bot.answer_callback_query(q.id).text("✅ Created").await?;
+                        bot.answer_callback_query(q.id).text("✅").await?;
                     }
                     Err(e) => {
                         tracing::error!("Failed to create task: {}", e);
@@ -2039,19 +2043,23 @@ pub async fn callback_handler(
                             bot.edit_message_text(
                                 msg.chat().id,
                                 msg.id(),
-                                "❌ Couldn't create task",
+                                i18n.t(&lang, "task-create-failed"),
                             ).await?;
                         }
-                        bot.answer_callback_query(q.id).text("❌ Failed").await?;
+                        bot.answer_callback_query(q.id).text("❌").await?;
                     }
                 }
             } else {
-                bot.answer_callback_query(q.id).text("Session expired").await?;
+                bot.answer_callback_query(q.id).text(&i18n.t(&lang, "session-expired")).await?;
             }
         }
     } else if data == "dup:cancel" {
         // User cancelled duplicate task creation
         let telegram_id = q.from.id.0 as i64;
+        let lang = User::find_by_telegram_id(&pool, telegram_id).await
+            .map(|u| u.lang().to_string())
+            .unwrap_or_else(|| "en".to_string());
+
         if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
             context.take_pending_edit(user.id); // Clear pending
         }
@@ -2060,15 +2068,16 @@ pub async fn callback_handler(
             bot.edit_message_text(
                 msg.chat().id,
                 msg.id(),
-                "↩️ Cancelled",
+                format!("↩️ {}", i18n.t(&lang, "task-cancelled")),
             ).await?;
         }
 
-        bot.answer_callback_query(q.id).text("Cancelled").await?;
+        bot.answer_callback_query(q.id).text(&i18n.t(&lang, "task-cancelled")).await?;
     } else if data == "stale:review" {
         // Show stale tasks one by one for review
         let telegram_id = q.from.id.0 as i64;
         if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
+            let lang = user.lang();
             let stale_tasks = Task::find_stale(&pool, user.id, 7).await.unwrap_or_default();
 
             if let Some(msg) = &q.message {
@@ -2076,28 +2085,33 @@ pub async fn callback_handler(
                     bot.edit_message_text(
                         msg.chat().id,
                         msg.id(),
-                        "✅ No stale tasks!",
+                        i18n.t(lang, "stale-no-tasks"),
                     ).await?;
                 } else {
+                    let mut args = FluentArgs::new();
+                    args.set("count", stale_tasks.len() as i64);
                     bot.edit_message_text(
                         msg.chat().id,
                         msg.id(),
-                        format!("📋 Reviewing {} stale task{}...", stale_tasks.len(), if stale_tasks.len() == 1 { "" } else { "s" }),
+                        i18n.t_args(lang, "stale-reviewing", &args),
                     ).await?;
 
                     // Show each stale task with actions
                     for task in stale_tasks {
                         let keyboard = InlineKeyboardMarkup::new(vec![
                             vec![
-                                InlineKeyboardButton::callback("✅ Keep", format!("stale:touch:{}", task.id)),
-                                InlineKeyboardButton::callback("✓ Done", format!("done:{}", task.id)),
-                                InlineKeyboardButton::callback("🗑 Delete", format!("delete:{}", task.id)),
+                                InlineKeyboardButton::callback(&i18n.t(lang, "btn-keep"), format!("stale:touch:{}", task.id)),
+                                InlineKeyboardButton::callback(&i18n.t(lang, "btn-done"), format!("done:{}", task.id)),
+                                InlineKeyboardButton::callback(&i18n.t(lang, "btn-delete"), format!("delete:{}", task.id)),
                             ]
                         ]);
 
+                        let mut args = FluentArgs::new();
+                        args.set("title", task.title.clone());
+                        args.set("updated", task.updated_at.clone());
                         bot.send_message(
                             msg.chat().id,
-                            format!("🕐 {}\n\n📅 Last updated: {}", task.title, task.updated_at),
+                            i18n.t_args(lang, "stale-task-item", &args),
                         )
                         .reply_markup(keyboard)
                         .await?;
@@ -2111,6 +2125,7 @@ pub async fn callback_handler(
         // Touch all stale tasks to mark them as reviewed
         let telegram_id = q.from.id.0 as i64;
         if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
+            let lang = user.lang();
             let stale_tasks = Task::find_stale(&pool, user.id, 7).await.unwrap_or_default();
             let count = stale_tasks.len();
 
@@ -2119,52 +2134,65 @@ pub async fn callback_handler(
             }
 
             if let Some(msg) = q.message {
+                let mut args = FluentArgs::new();
+                args.set("count", count as i64);
                 bot.edit_message_text(
                     msg.chat().id,
                     msg.id(),
-                    format!("✅ Kept {} task{}. They won't appear as stale for 7 more days.", count, if count == 1 { "" } else { "s" }),
+                    i18n.t_args(lang, "stale-kept-all", &args),
                 ).await?;
             }
         }
 
-        bot.answer_callback_query(q.id).text("✅ Kept all").await?;
+        bot.answer_callback_query(q.id).text("✅").await?;
     } else if let Some(task_id_str) = data.strip_prefix("stale:touch:") {
         // Touch single stale task
         if let Ok(task_id) = task_id_str.parse::<i64>() {
             if let Some(task) = Task::find_by_id(&pool, task_id).await {
                 let _ = Task::touch(&pool, task_id).await;
 
+                let telegram_id = q.from.id.0 as i64;
+                let lang = User::find_by_telegram_id(&pool, telegram_id).await
+                    .map(|u| u.lang().to_string())
+                    .unwrap_or_else(|| "en".to_string());
+
                 if let Some(msg) = q.message {
+                    let mut args = FluentArgs::new();
+                    args.set("title", task.title.clone());
                     bot.edit_message_text(
                         msg.chat().id,
                         msg.id(),
-                        format!("✅ Kept: {}", task.title),
+                        i18n.t_args(&lang, "stale-kept-one", &args),
                     ).await?;
                 }
 
-                bot.answer_callback_query(q.id).text("✅ Kept").await?;
+                bot.answer_callback_query(q.id).text("✅").await?;
             }
         }
     } else if let Some(title) = data.strip_prefix("clarify:asis:") {
         // Create task with original vague title
         let telegram_id = q.from.id.0 as i64;
         if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
+            let lang = user.lang();
             match Task::create(&pool, user.id, title, None, None, None).await {
                 Ok(task) => {
                     if let Some(msg) = q.message {
+                        let mut args = FluentArgs::new();
+                        args.set("title", task.title.clone());
+                        args.set("due", "");
                         bot.edit_message_text(
                             msg.chat().id,
                             msg.id(),
-                            format!("✅ Added!\n\n📝 {}", task.title),
+                            i18n.t_args(lang, "task-added", &args),
                         )
                         .reply_markup(task_keyboard(task.id))
                         .await?;
                     }
-                    bot.answer_callback_query(q.id).text("✅ Created").await?;
+                    bot.answer_callback_query(q.id).text("✅").await?;
                 }
                 Err(e) => {
                     tracing::error!("Failed to create task: {}", e);
-                    bot.answer_callback_query(q.id).text("❌ Failed").await?;
+                    bot.answer_callback_query(q.id).text("❌").await?;
                 }
             }
         }
@@ -2172,31 +2200,40 @@ pub async fn callback_handler(
         // Create task with suggested specific title
         let telegram_id = q.from.id.0 as i64;
         if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
+            let lang = user.lang();
             match Task::create(&pool, user.id, title, None, None, None).await {
                 Ok(task) => {
                     if let Some(msg) = q.message {
+                        let mut args = FluentArgs::new();
+                        args.set("title", task.title.clone());
+                        args.set("due", "");
                         bot.edit_message_text(
                             msg.chat().id,
                             msg.id(),
-                            format!("✅ Added!\n\n📝 {}", task.title),
+                            i18n.t_args(lang, "task-added", &args),
                         )
                         .reply_markup(task_keyboard(task.id))
                         .await?;
                     }
-                    bot.answer_callback_query(q.id).text("✅ Created").await?;
+                    bot.answer_callback_query(q.id).text("✅").await?;
                 }
                 Err(e) => {
                     tracing::error!("Failed to create task: {}", e);
-                    bot.answer_callback_query(q.id).text("❌ Failed").await?;
+                    bot.answer_callback_query(q.id).text("❌").await?;
                 }
             }
         }
     } else if data == "settings:timezone" {
         // Show timezone options with auto-detect
+        let telegram_id = q.from.id.0 as i64;
+        let lang = User::find_by_telegram_id(&pool, telegram_id).await
+            .map(|u| u.lang().to_string())
+            .unwrap_or_else(|| "en".to_string());
+
         let tz_keyboard = InlineKeyboardMarkup::new(vec![
             vec![
-                InlineKeyboardButton::callback("📍 Auto-detect", "tz:auto"),
-                InlineKeyboardButton::callback("🏙 Type city", "tz:city"),
+                InlineKeyboardButton::callback(&i18n.t(&lang, "btn-auto-detect"), "tz:auto"),
+                InlineKeyboardButton::callback(&i18n.t(&lang, "btn-type-city"), "tz:city"),
             ],
             vec![
                 InlineKeyboardButton::callback("🇺🇸 New York", "tz:America/New_York"),
@@ -2212,7 +2249,7 @@ pub async fn callback_handler(
             ],
             vec![
                 InlineKeyboardButton::callback("🇯🇵 Tokyo", "tz:Asia/Tokyo"),
-                InlineKeyboardButton::callback("↩️ Back", "settings:back"),
+                InlineKeyboardButton::callback(&i18n.t(&lang, "btn-back"), "settings:back"),
             ],
         ]);
 
@@ -2220,7 +2257,7 @@ pub async fn callback_handler(
             bot.edit_message_text(
                 msg.chat().id,
                 msg.id(),
-                "🌍 Select your timezone:\n\n📍 Auto-detect uses your location\n🏙 Type city lets you enter any city",
+                i18n.t(&lang, "tz-select-title"),
             )
             .reply_markup(tz_keyboard)
             .await?;
@@ -2229,16 +2266,22 @@ pub async fn callback_handler(
         bot.answer_callback_query(q.id).await?;
     } else if data == "tz:auto" {
         // Request location for auto-detect
+        let telegram_id = q.from.id.0 as i64;
+        let lang = User::find_by_telegram_id(&pool, telegram_id).await
+            .map(|u| u.lang().to_string())
+            .unwrap_or_else(|| "en".to_string());
+
         if let Some(msg) = &q.message {
+            let btn_text = if lang == "ru" { "📍 Поделиться геолокацией" } else { "📍 Share my location" };
             let location_keyboard = KeyboardMarkup::new(vec![vec![
-                KeyboardButton::new("📍 Share my location").request(teloxide::types::ButtonRequest::Location),
+                KeyboardButton::new(btn_text).request(teloxide::types::ButtonRequest::Location),
             ]])
             .resize_keyboard()
             .one_time_keyboard();
 
             bot.send_message(
                 msg.chat().id,
-                "📍 Tap the button below to share your location.\n\nI'll detect your timezone automatically.",
+                i18n.t(&lang, "tz-auto-prompt"),
             )
             .reply_markup(location_keyboard)
             .await?;
@@ -2248,6 +2291,10 @@ pub async fn callback_handler(
     } else if data == "tz:city" {
         // Ask for city name
         let telegram_id = q.from.id.0 as i64;
+        let lang = User::find_by_telegram_id(&pool, telegram_id).await
+            .map(|u| u.lang().to_string())
+            .unwrap_or_else(|| "en".to_string());
+
         if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
             context.set_pending_edit(user.id, PendingEdit::Timezone);
         }
@@ -2255,31 +2302,39 @@ pub async fn callback_handler(
         if let Some(msg) = &q.message {
             bot.send_message(
                 msg.chat().id,
-                "🏙 Type your city name:\n\nExamples: Moscow, New York, Tokyo, Dubai",
+                i18n.t(&lang, "tz-city-prompt"),
             )
             .await?;
         }
 
-        bot.answer_callback_query(q.id).text("Type your city").await?;
+        bot.answer_callback_query(q.id).await?;
     } else if let Some(tz) = data.strip_prefix("tz:") {
         // Set timezone
         let telegram_id = q.from.id.0 as i64;
         if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
+            let lang = user.lang();
             let _ = User::update_timezone(&pool, user.id, tz).await;
 
             if let Some(msg) = &q.message {
+                let mut args = FluentArgs::new();
+                args.set("tz", tz.to_string());
                 bot.edit_message_text(
                     msg.chat().id,
                     msg.id(),
-                    format!("✅ Timezone set to: {}", tz),
+                    i18n.t_args(lang, "tz-updated", &args),
                 )
                 .await?;
             }
 
-            bot.answer_callback_query(q.id).text("✅ Timezone updated").await?;
+            bot.answer_callback_query(q.id).text("✅").await?;
         }
     } else if data == "settings:brief_time" {
         // Show brief time options
+        let telegram_id = q.from.id.0 as i64;
+        let lang = User::find_by_telegram_id(&pool, telegram_id).await
+            .map(|u| u.lang().to_string())
+            .unwrap_or_else(|| "en".to_string());
+
         let time_keyboard = InlineKeyboardMarkup::new(vec![
             vec![
                 InlineKeyboardButton::callback("06:00", "brief:06:00"),
@@ -2292,7 +2347,7 @@ pub async fn callback_handler(
                 InlineKeyboardButton::callback("11:00", "brief:11:00"),
             ],
             vec![
-                InlineKeyboardButton::callback("↩️ Back", "settings:back"),
+                InlineKeyboardButton::callback(&i18n.t(&lang, "btn-back"), "settings:back"),
             ],
         ]);
 
@@ -2300,7 +2355,7 @@ pub async fn callback_handler(
             bot.edit_message_text(
                 msg.chat().id,
                 msg.id(),
-                "⏰ Select morning brief time (UTC):",
+                i18n.t(&lang, "brief-select-title"),
             )
             .reply_markup(time_keyboard)
             .await?;
@@ -2311,18 +2366,21 @@ pub async fn callback_handler(
         // Set brief time
         let telegram_id = q.from.id.0 as i64;
         if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
+            let lang = user.lang();
             let _ = User::update_morning_brief_time(&pool, user.id, time).await;
 
             if let Some(msg) = &q.message {
+                let mut args = FluentArgs::new();
+                args.set("time", time.to_string());
                 bot.edit_message_text(
                     msg.chat().id,
                     msg.id(),
-                    format!("✅ Morning brief time set to: {} UTC", time),
+                    i18n.t_args(lang, "brief-updated", &args),
                 )
                 .await?;
             }
 
-            bot.answer_callback_query(q.id).text("✅ Brief time updated").await?;
+            bot.answer_callback_query(q.id).text("✅").await?;
         }
     } else if data == "settings:language" {
         // Show language options
@@ -2340,7 +2398,7 @@ pub async fn callback_handler(
             bot.edit_message_text(
                 msg.chat().id,
                 msg.id(),
-                "🌐 Select language / Выберите язык:",
+                i18n.t("en", "lang-select-title"), // This is intentionally bilingual
             )
             .reply_markup(lang_keyboard)
             .await?;
@@ -2353,16 +2411,17 @@ pub async fn callback_handler(
         if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
             let _ = User::update_language(&pool, user.id, lang).await;
 
-            let confirmation = match lang {
-                "ru" => "✅ Язык изменён на Русский",
-                _ => "✅ Language changed to English",
+            // Use the NEW language for confirmation
+            let confirmation_key = match lang {
+                "ru" => "lang-updated-ru",
+                _ => "lang-updated-en",
             };
 
             if let Some(msg) = &q.message {
                 bot.edit_message_text(
                     msg.chat().id,
                     msg.id(),
-                    confirmation,
+                    i18n.t(lang, confirmation_key),
                 )
                 .await?;
             }

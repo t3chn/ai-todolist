@@ -193,6 +193,55 @@ task-snoozed = ⏰ Отложено: <b>{ $title }</b>
     Напомню { $when }.
 task-deleted-msg = 🗑 Удалено: { $title }
 task-cancelled = Отменено
+task-added = ✅ Добавлено!
+
+    📝 { $title }{ $due }
+task-create-failed = ❌ Не удалось создать задачу
+session-expired = Сессия истекла
+
+# === Stale Tasks ===
+stale-no-tasks = ✅ Нет устаревших задач!
+stale-reviewing = 📋 Проверяем { $count } { $count ->
+    [one] устаревшую задачу
+    [few] устаревшие задачи
+    *[other] устаревших задач
+}...
+stale-task-item = 🕐 { $title }
+
+    📅 Обновлено: { $updated }
+stale-kept-all = ✅ Сохранено { $count } { $count ->
+    [one] задача
+    [few] задачи
+    *[other] задач
+}. Они не будут отмечены как устаревшие ещё 7 дней.
+stale-kept-one = ✅ Сохранено: { $title }
+btn-keep = ✅ Оставить
+btn-review = 📋 Обзор
+btn-keep-all = ✓ Оставить все
+
+# === Timezone ===
+tz-select-title = 🌍 Выбери часовой пояс:
+
+    📍 Автоопределение по геолокации
+    🏙 Ввести город вручную
+tz-auto-prompt = 📍 Нажми кнопку ниже, чтобы поделиться геолокацией.
+
+    Я определю часовой пояс автоматически.
+tz-city-prompt = 🏙 Введи название города:
+
+    Примеры: Москва, Киев, Минск, Алматы
+tz-updated = ✅ Часовой пояс установлен: { $tz }
+btn-auto-detect = 📍 Автоопределение
+btn-type-city = 🏙 Ввести город
+
+# === Brief Time ===
+brief-select-title = ⏰ Выбери время утреннего дайджеста:
+brief-updated = ✅ Время дайджеста установлено: { $time }
+
+# === Language ===
+lang-select-title = 🌐 Select language / Выберите язык:
+lang-updated-en = ✅ Language changed to English
+lang-updated-ru = ✅ Язык изменён на Русский
 
 # === Voice ===
 voice-processing = 🎤 Обрабатываю голосовое сообщение...
