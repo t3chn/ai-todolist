@@ -288,6 +288,50 @@ error-generic = ❌ Something went wrong. Please try again.
 error-not-found = ❌ Task not found.
 error-subscription-required = ⭐ Subscription required to use this feature.
 error-start-first = Please /start first
+error-use-buttons = ⚠️ Please use the buttons above to confirm or cancel.
+error-task-create = ❌ Couldn't create task
+
+    Something went wrong on our end.
+
+    💡 Try: "Buy milk tomorrow at 5pm"
+
+# === Subscription Expired ===
+subscription-expired-full = ⏰ Your trial has ended!
+
+    To continue using AI Todolist, subscribe:
+
+    ⭐ 1 month — 250 Stars (~$5)
+    ⭐ 3 months — 600 Stars (~$12)
+    ⭐ 12 months — 2000 Stars (~$40)
+
+    Use /settings → Subscribe
+
+# === Draft ===
+draft-message = ✉️ Draft for { $recipient }:
+
+    { $text }
+
+    💡 Copy and send!
+
+# === Clarify ===
+clarify-prompt = 🤔 { $question }
+
+    Pick a specific action:
+btn-create-as-is = 📝 Create as-is
+
+# === AI Commands ===
+ai-tasks-empty = 📋 No pending tasks!
+
+    💡 Send a task like: "Call mom tomorrow"
+ai-tasks-more = ...and { $count } more
+ai-today-empty = 📅 No tasks for today!
+
+    💡 Add one: "Meeting at 3pm"
+ai-today-header = 📅 Today ({ $count } { $count ->
+    [one] task
+    *[other] tasks
+}):
+ai-unknown-command = 🤖 Unknown command
 
 # === Admin ===
 admin-title = 🔧 <b>Admin Panel</b>

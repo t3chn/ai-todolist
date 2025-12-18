@@ -297,6 +297,51 @@ error-generic = ❌ Что-то пошло не так. Попробуй ещё 
 error-not-found = ❌ Задача не найдена.
 error-subscription-required = ⭐ Для этой функции нужна подписка.
 error-start-first = Сначала нажми /start
+error-use-buttons = ⚠️ Пожалуйста, используй кнопки выше.
+error-task-create = ❌ Не удалось создать задачу
+
+    Что-то пошло не так.
+
+    💡 Попробуй: "Купить молоко завтра в 17:00"
+
+# === Subscription Expired ===
+subscription-expired-full = ⏰ Пробный период закончился!
+
+    Чтобы продолжить использовать AI Todolist, оформи подписку:
+
+    ⭐ 1 месяц — 250 Stars (~$5)
+    ⭐ 3 месяца — 600 Stars (~$12)
+    ⭐ 12 месяцев — 2000 Stars (~$40)
+
+    Используй /settings → Подписаться
+
+# === Draft ===
+draft-message = ✉️ Черновик для { $recipient }:
+
+    { $text }
+
+    💡 Скопируй и отправь!
+
+# === Clarify ===
+clarify-prompt = 🤔 { $question }
+
+    Выбери конкретное действие:
+btn-create-as-is = 📝 Создать как есть
+
+# === AI Commands ===
+ai-tasks-empty = 📋 Задач нет!
+
+    💡 Отправь задачу: "Позвонить маме завтра"
+ai-tasks-more = ...и ещё { $count }
+ai-today-empty = 📅 На сегодня задач нет!
+
+    💡 Добавь: "Встреча в 15:00"
+ai-today-header = 📅 Сегодня ({ $count } { $count ->
+    [one] задача
+    [few] задачи
+    *[other] задач
+}):
+ai-unknown-command = 🤖 Неизвестная команда
 
 # === Admin ===
 admin-title = 🔧 <b>Панель администратора</b>

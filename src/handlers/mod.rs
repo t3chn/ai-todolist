@@ -18,18 +18,11 @@ const PRICE_3_MONTHS: i32 = 600; // ~$12 (save ~$3)
 const PRICE_12_MONTHS: i32 = 2000; // ~$40 (save ~$20)
 
 /// Check subscription status and return appropriate message if expired
-fn check_subscription(user: &User) -> Option<String> {
+fn check_subscription(user: &User, i18n: &I18n) -> Option<String> {
     if user.has_active_subscription() {
         None
     } else {
-        Some(
-            "⏰ Your trial has ended!\n\n\
-            To continue using AI Todolist, subscribe:\n\n\
-            ⭐ 1 month — 250 Stars (~$5)\n\
-            ⭐ 3 months — 600 Stars (~$12)\n\
-            ⭐ 12 months — 2000 Stars (~$40)\n\n\
-            Use /settings → Subscribe".to_string()
-        )
+        Some(i18n.t(user.lang(), "subscription-expired-full"))
     }
 }
 
@@ -81,15 +74,15 @@ fn get_support_chat_id() -> Option<ChatId> {
         .map(ChatId)
 }
 
-fn task_keyboard(task_id: i64) -> InlineKeyboardMarkup {
+fn task_keyboard(task_id: i64, i18n: &I18n, lang: &str) -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![
         vec![
-            InlineKeyboardButton::callback("✅ Done", format!("done:{}", task_id)),
-            InlineKeyboardButton::callback("🗑 Delete", format!("delete:{}", task_id)),
+            InlineKeyboardButton::callback(&i18n.t(lang, "btn-done"), format!("done:{}", task_id)),
+            InlineKeyboardButton::callback(&i18n.t(lang, "btn-delete"), format!("delete:{}", task_id)),
         ],
         vec![
-            InlineKeyboardButton::callback("✏️ Edit", format!("edit:{}", task_id)),
-            InlineKeyboardButton::callback("⏰ Remind", format!("remind:{}", task_id)),
+            InlineKeyboardButton::callback(&i18n.t(lang, "btn-edit"), format!("edit:{}", task_id)),
+            InlineKeyboardButton::callback("⏰", format!("remind:{}", task_id)),
         ],
     ])
 }
@@ -446,7 +439,7 @@ pub async fn message_handler(
                                             msg.chat.id,
                                             format!("  📝 {}{}", task.title, due),
                                         )
-                                        .reply_markup(task_keyboard(task.id))
+                                        .reply_markup(task_keyboard(task.id, &i18n, lang))
                                         .await?;
                                     }
                                 }
@@ -483,7 +476,7 @@ pub async fn message_handler(
                                     msg.chat.id,
                                     format!("📝 {}{}", task.title, time),
                                 )
-                                .reply_markup(task_keyboard(task.id))
+                                .reply_markup(task_keyboard(task.id, &i18n, lang))
                                 .await?;
                             }
                         }
@@ -712,7 +705,7 @@ Share your link and get <b>+7 days</b> for each friend who joins!
         if let Some(tg_user) = telegram_user {
             if let Some(user) = User::find_by_telegram_id(&pool, tg_user.id.0 as i64).await {
                 // Check subscription
-                if let Some(expired_msg) = check_subscription(&user) {
+                if let Some(expired_msg) = check_subscription(&user, &i18n) {
                     bot.send_message(msg.chat.id, expired_msg).await?;
                     return Ok(());
                 }
@@ -824,7 +817,7 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                                         progress_msg.id,
                                                         format!("🎤 \"{}\"\n\n⏰ Reminder set!\n\n📝 {}\n🔔 {}", transcript, task.title, reminder_at),
                                                     )
-                                                    .reply_markup(task_keyboard(task_id))
+                                                    .reply_markup(task_keyboard(task_id, &i18n, user.lang()))
                                                     .await?;
                                                 }
                                             }
@@ -1016,7 +1009,7 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                                 progress_msg.id,
                                                 format!("🎤 \"{}\"\n\n✅ Added!\n\n📝 {}{}", transcript, task.title, due_str),
                                             )
-                                            .reply_markup(task_keyboard(task.id))
+                                            .reply_markup(task_keyboard(task.id, &i18n, user.lang()))
                                             .await?;
                                         }
                                         Err(e) => {
@@ -1073,7 +1066,7 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                                         msg.chat.id,
                                                         format!("📝 {}{}", task.title, due_str),
                                                     )
-                                                    .reply_markup(task_keyboard(task.id))
+                                                    .reply_markup(task_keyboard(task.id, &i18n, user.lang()))
                                                     .await?;
                                                 }
                                             }
@@ -1093,7 +1086,7 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                                         msg.chat.id,
                                                         format!("📝 {}{}", task.title, due_str),
                                                     )
-                                                    .reply_markup(task_keyboard(task.id))
+                                                    .reply_markup(task_keyboard(task.id, &i18n, user.lang()))
                                                     .await?;
                                                 }
                                             }
@@ -1158,7 +1151,7 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                                 progress_msg.id,
                                                 format!("🎤 \"{}\"\n\n✅ Added!\n\n📝 {}", transcript, task.title),
                                             )
-                                            .reply_markup(task_keyboard(task.id))
+                                            .reply_markup(task_keyboard(task.id, &i18n, user.lang()))
                                             .await?;
                                         }
                                         Err(e) => {
@@ -1304,7 +1297,7 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                                 msg.chat.id,
                                                 format!("⏰ Reminder set!\n\n📝 {}\n🔔 {}", task.title, reminder_at),
                                             )
-                                            .reply_markup(task_keyboard(task_id))
+                                            .reply_markup(task_keyboard(task_id, &i18n, user.lang()))
                                             .await?;
                                         }
                                     }
@@ -1509,7 +1502,7 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                 // Natural language input
                 if let Some(ai) = &ai_service {
                     // Check subscription
-                    if let Some(expired_msg) = check_subscription(&user) {
+                    if let Some(expired_msg) = check_subscription(&user, &i18n) {
                         bot.send_message(msg.chat.id, expired_msg).await?;
                         return Ok(());
                     }
@@ -1545,6 +1538,8 @@ Share your link and get <b>+7 days</b> for each friend who joins!
 
                             let tags_str = if parsed.tags.is_empty() { None } else { Some(parsed.tags.join(",")) };
 
+                            let lang = user.lang();
+
                             // Check for duplicate
                             if let Some(existing) = Task::find_similar(&pool, user.id, &parsed.title).await {
                                 context.set_pending_edit(user.id, PendingEdit::ConfirmDuplicate(PendingTask {
@@ -1555,17 +1550,16 @@ Share your link and get <b>+7 days</b> for each friend who joins!
 
                                 let keyboard = InlineKeyboardMarkup::new(vec![
                                     vec![
-                                        InlineKeyboardButton::callback("✅ Create anyway", "dup:create"),
-                                        InlineKeyboardButton::callback("❌ Cancel", "dup:cancel"),
+                                        InlineKeyboardButton::callback(&i18n.t(lang, "btn-create-anyway"), "dup:create"),
+                                        InlineKeyboardButton::callback(&i18n.t(lang, "btn-cancel"), "dup:cancel"),
                                     ]
                                 ]);
 
+                                let mut args = FluentArgs::new();
+                                args.set("title", existing.title.clone());
                                 bot.send_message(
                                     msg.chat.id,
-                                    format!(
-                                        "⚠️ Similar task exists:\n\n📝 \"{}\"\n\nCreate \"{}\" anyway?",
-                                        existing.title, parsed.title
-                                    ),
+                                    i18n.t_args(lang, "duplicate-warning", &args),
                                 )
                                 .reply_markup(keyboard)
                                 .await?;
@@ -1585,16 +1579,19 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                     let response = format!("Added task: {}{}", task.title, due_str);
                                     context.add_message(user.id, "assistant", &response);
 
+                                    let mut args = FluentArgs::new();
+                                    args.set("title", task.title.clone());
+                                    args.set("due", due_str);
                                     bot.send_message(
                                         msg.chat.id,
-                                        format!("✅ Added!\n\n📝 {}{}", task.title, due_str),
+                                        i18n.t_args(lang, "task-added", &args),
                                     )
-                                    .reply_markup(task_keyboard(task.id))
+                                    .reply_markup(task_keyboard(task.id, &i18n, lang))
                                     .await?;
                                 }
                                 Err(e) => {
                                     tracing::error!("Failed to create task: {}", e);
-                                    bot.send_message(msg.chat.id, "❌ Couldn't create task\n\nSomething went wrong on our end.\n\n💡 Try: \"Buy milk tomorrow at 5pm\"")
+                                    bot.send_message(msg.chat.id, i18n.t(lang, "error-task-create"))
                                         .await?;
                                 }
                             }
@@ -1604,36 +1601,44 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                             let response = format!("Draft for {}: {}", recipient, ctx);
                             context.add_message(user.id, "assistant", &response);
 
+                            let lang = user.lang();
+                            let mut args = FluentArgs::new();
+                            args.set("recipient", recipient.clone());
+                            args.set("text", draft.clone());
                             bot.send_message(
                                 msg.chat.id,
-                                format!("✉️ Draft for {}:\n\n{}\n\n💡 Copy and send!", recipient, draft),
+                                i18n.t_args(lang, "draft-message", &args),
                             )
                             .await?;
                         }
                         Ok(ParsedInput::Clarify { original, question, suggestions }) => {
                             tracing::info!("AI needs clarification for: {}", original);
+                            let lang = user.lang();
                             // Build suggestion buttons
                             let mut keyboard_rows: Vec<Vec<InlineKeyboardButton>> = suggestions.iter()
                                 .map(|s| vec![InlineKeyboardButton::callback(s.clone(), format!("clarify:{}", s))])
                                 .collect();
                             keyboard_rows.push(vec![
-                                InlineKeyboardButton::callback("📝 Create as-is", format!("clarify:asis:{}", original))
+                                InlineKeyboardButton::callback(&i18n.t(lang, "btn-create-as-is"), format!("clarify:asis:{}", original))
                             ]);
 
+                            let mut args = FluentArgs::new();
+                            args.set("question", question.clone());
                             bot.send_message(
                                 msg.chat.id,
-                                format!("🤔 {}\n\nPick a specific action:", question),
+                                i18n.t_args(lang, "clarify-prompt", &args),
                             )
                             .reply_markup(InlineKeyboardMarkup::new(keyboard_rows))
                             .await?;
                         }
                         Ok(ParsedInput::Command { action }) => {
                             tracing::info!("AI command: {}", action);
+                            let lang = user.lang();
                             match action.as_str() {
                                 "show_tasks" => {
                                     let tasks = Task::find_pending_by_user(&pool, user.id).await.unwrap_or_default();
                                     if tasks.is_empty() {
-                                        bot.send_message(msg.chat.id, "📋 No pending tasks!\n\n💡 Send a task like: \"Call mom tomorrow\"")
+                                        bot.send_message(msg.chat.id, i18n.t(lang, "ai-tasks-empty"))
                                             .await?;
                                     } else {
                                         for task in tasks.iter().take(10) {
@@ -1648,11 +1653,13 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                                 msg.chat.id,
                                                 format!("📝 {}{}{}", task.title, due_str, reminder_str),
                                             )
-                                            .reply_markup(task_keyboard(task.id))
+                                            .reply_markup(task_keyboard(task.id, &i18n, lang))
                                             .await?;
                                         }
                                         if tasks.len() > 10 {
-                                            bot.send_message(msg.chat.id, format!("...and {} more", tasks.len() - 10))
+                                            let mut args = FluentArgs::new();
+                                            args.set("count", (tasks.len() - 10) as i64);
+                                            bot.send_message(msg.chat.id, i18n.t_args(lang, "ai-tasks-more", &args))
                                                 .await?;
                                         }
                                     }
@@ -1660,10 +1667,12 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                 "show_today" => {
                                     let tasks = Task::find_today_tasks(&pool, user.id).await.unwrap_or_default();
                                     if tasks.is_empty() {
-                                        bot.send_message(msg.chat.id, "📅 No tasks for today!\n\n💡 Add one: \"Meeting at 3pm\"")
+                                        bot.send_message(msg.chat.id, i18n.t(lang, "ai-today-empty"))
                                             .await?;
                                     } else {
-                                        bot.send_message(msg.chat.id, format!("📅 Today ({} tasks):", tasks.len()))
+                                        let mut args = FluentArgs::new();
+                                        args.set("count", tasks.len() as i64);
+                                        bot.send_message(msg.chat.id, i18n.t_args(lang, "ai-today-header", &args))
                                             .await?;
                                         for task in tasks.iter() {
                                             let due_str = task.due_at.as_ref()
@@ -1674,7 +1683,7 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                                 msg.chat.id,
                                                 format!("📝 {}{}", task.title, due_str),
                                             )
-                                            .reply_markup(task_keyboard(task.id))
+                                            .reply_markup(task_keyboard(task.id, &i18n, lang))
                                             .await?;
                                         }
                                     }
@@ -1682,31 +1691,25 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                 "settings" => {
                                     let settings_keyboard = InlineKeyboardMarkup::new(vec![
                                         vec![
-                                            InlineKeyboardButton::callback("🌍 Timezone", "settings:timezone"),
-                                            InlineKeyboardButton::callback("🌅 Morning brief", "settings:brief"),
+                                            InlineKeyboardButton::callback(&i18n.t(lang, "btn-timezone"), "settings:timezone"),
+                                            InlineKeyboardButton::callback(&i18n.t(lang, "btn-brief-time"), "settings:brief_time"),
                                         ],
                                     ]);
-                                    bot.send_message(msg.chat.id, "⚙️ Settings")
+                                    bot.send_message(msg.chat.id, i18n.t(lang, "settings-title"))
                                         .reply_markup(settings_keyboard)
+                                        .parse_mode(teloxide::types::ParseMode::Html)
                                         .await?;
                                 }
                                 "help" => {
                                     bot.send_message(
                                         msg.chat.id,
-                                        "📋 <b>What I can do:</b>\n\n\
-                                        📝 Create tasks: \"Call mom tomorrow at 5pm\"\n\
-                                        🎤 Voice tasks: send voice message\n\
-                                        ✉️ Drafts: \"Draft message to boss\"\n\n\
-                                        <b>Commands:</b>\n\
-                                        • \"покажи задачи\" / \"show tasks\"\n\
-                                        • \"что на сегодня\" / \"today\"\n\
-                                        • \"настройки\" / \"settings\"",
+                                        i18n.t(lang, "help-text"),
                                     )
                                     .parse_mode(teloxide::types::ParseMode::Html)
                                     .await?;
                                 }
                                 _ => {
-                                    bot.send_message(msg.chat.id, "🤖 Unknown command").await?;
+                                    bot.send_message(msg.chat.id, i18n.t(lang, "ai-unknown-command")).await?;
                                 }
                             }
                         }
@@ -1720,6 +1723,7 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                         }
                         Err(e) => {
                             tracing::warn!("AI parse failed: {}, creating task with raw text", e);
+                            let lang = user.lang();
                             // Check task creation rate limit
                             if let Err(limit_msg) = RateLimiter::check_and_increment(
                                 &pool, user.id, "task", limits.tasks_per_day, 1440
@@ -1730,16 +1734,19 @@ Share your link and get <b>+7 days</b> for each friend who joins!
 
                             match Task::create(&pool, user.id, text, None, None, None).await {
                                 Ok(task) => {
+                                    let mut args = FluentArgs::new();
+                                    args.set("title", task.title.clone());
+                                    args.set("due", "");
                                     bot.send_message(
                                         msg.chat.id,
-                                        format!("✅ Added!\n\n📝 {}", task.title),
+                                        i18n.t_args(lang, "task-added", &args),
                                     )
-                                    .reply_markup(task_keyboard(task.id))
+                                    .reply_markup(task_keyboard(task.id, &i18n, lang))
                                     .await?;
                                 }
                                 Err(e) => {
                                     tracing::error!("Failed to create task: {}", e);
-                                    bot.send_message(msg.chat.id, "❌ Couldn't create task\n\nSomething went wrong on our end.\n\n💡 Try: \"Buy milk tomorrow at 5pm\"")
+                                    bot.send_message(msg.chat.id, i18n.t(lang, "error-task-create"))
                                         .await?;
                                 }
                             }
@@ -1748,7 +1755,7 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                 } else {
                     // No AI service, create raw task
                     // Check subscription
-                    if let Some(expired_msg) = check_subscription(&user) {
+                    if let Some(expired_msg) = check_subscription(&user, &i18n) {
                         bot.send_message(msg.chat.id, expired_msg).await?;
                         return Ok(());
                     }
@@ -1762,18 +1769,22 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                         return Ok(());
                     }
 
+                    let lang = user.lang();
                     match Task::create(&pool, user.id, text, None, None, None).await {
                         Ok(task) => {
+                            let mut args = FluentArgs::new();
+                            args.set("title", task.title.clone());
+                            args.set("due", "");
                             bot.send_message(
                                 msg.chat.id,
-                                format!("✅ Added!\n\n📝 {}", task.title),
+                                i18n.t_args(lang, "task-added", &args),
                             )
-                            .reply_markup(task_keyboard(task.id))
+                            .reply_markup(task_keyboard(task.id, &i18n, lang))
                             .await?;
                         }
                         Err(e) => {
                             tracing::error!("Failed to create task: {}", e);
-                            bot.send_message(msg.chat.id, "❌ Couldn't create task\n\nSomething went wrong on our end.\n\n💡 Try: \"Buy milk tomorrow at 5pm\"")
+                            bot.send_message(msg.chat.id, i18n.t(lang, "error-task-create"))
                                 .await?;
                         }
                     }
@@ -1931,7 +1942,7 @@ pub async fn callback_handler(
                         msg.id(),
                         format!("📝 {}{}", task.title, due_str),
                     )
-                    .reply_markup(task_keyboard(task_id))
+                    .reply_markup(task_keyboard(task_id, &i18n, &lang))
                     .await?;
                 }
 
@@ -1998,7 +2009,7 @@ pub async fn callback_handler(
                             msg.chat().id,
                             format!("📝 {}{}", task.title, due),
                         )
-                        .reply_markup(task_keyboard(task.id))
+                        .reply_markup(task_keyboard(task.id, &i18n, lang))
                         .await?;
                     }
                 }
@@ -2031,7 +2042,7 @@ pub async fn callback_handler(
                                 msg.id(),
                                 i18n.t_args(&lang, "task-added", &args),
                             )
-                            .reply_markup(task_keyboard(task.id))
+                            .reply_markup(task_keyboard(task.id, &i18n, &lang))
                             .await?;
                         }
 
@@ -2185,7 +2196,7 @@ pub async fn callback_handler(
                             msg.id(),
                             i18n.t_args(lang, "task-added", &args),
                         )
-                        .reply_markup(task_keyboard(task.id))
+                        .reply_markup(task_keyboard(task.id, &i18n, lang))
                         .await?;
                     }
                     bot.answer_callback_query(q.id).text("✅").await?;
@@ -2212,7 +2223,7 @@ pub async fn callback_handler(
                             msg.id(),
                             i18n.t_args(lang, "task-added", &args),
                         )
-                        .reply_markup(task_keyboard(task.id))
+                        .reply_markup(task_keyboard(task.id, &i18n, lang))
                         .await?;
                     }
                     bot.answer_callback_query(q.id).text("✅").await?;
@@ -2636,7 +2647,7 @@ pub async fn callback_handler(
                                 msg.id(),
                                 format!("✅ Updated!\n\n📝 {}{}", task.title, due_str),
                             )
-                            .reply_markup(task_keyboard(task_id))
+                            .reply_markup(task_keyboard(task_id, &i18n, user.lang()))
                             .await?;
                         }
                     }
@@ -2665,11 +2676,14 @@ pub async fn callback_handler(
     } else if let Some(task_id_str) = data.strip_prefix("cancel_edit:") {
         // Cancel pending edit and restore task view
         if let Ok(task_id) = task_id_str.parse::<i64>() {
-            // Clear pending edit
+            // Clear pending edit and get user lang
             let telegram_id = q.from.id.0 as i64;
-            if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
+            let lang = if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
                 let _ = context.take_pending_edit(user.id);
-            }
+                user.lang().to_string()
+            } else {
+                "en".to_string()
+            };
 
             if let Some(task) = Task::find_by_id(&pool, task_id).await {
                 if let Some(msg) = &q.message {
@@ -2682,7 +2696,7 @@ pub async fn callback_handler(
                         msg.id(),
                         format!("📝 {}{}", task.title, due_str),
                     )
-                    .reply_markup(task_keyboard(task_id))
+                    .reply_markup(task_keyboard(task_id, &i18n, &lang))
                     .await?;
                 }
             }
@@ -2743,6 +2757,11 @@ pub async fn callback_handler(
                     let _ = Task::set_reminder(&pool, task_id, None).await;
                 }
 
+                let telegram_id = q.from.id.0 as i64;
+                let lang = User::find_by_telegram_id(&pool, telegram_id).await
+                    .map(|u| u.lang().to_string())
+                    .unwrap_or_else(|| "en".to_string());
+
                 if let Some(task) = Task::find_by_id(&pool, task_id).await {
                     if let Some(msg) = &q.message {
                         let due_str = task.due_at.as_ref()
@@ -2754,7 +2773,7 @@ pub async fn callback_handler(
                             msg.id(),
                             format!("✅ Updated!\n\n📝 {}{}", task.title, due_str),
                         )
-                        .reply_markup(task_keyboard(task_id))
+                        .reply_markup(task_keyboard(task_id, &i18n, &lang))
                         .await?;
                     }
                 }
@@ -2857,6 +2876,11 @@ pub async fn callback_handler(
 
                 let _ = Task::set_reminder(&pool, task_id, reminder_time.as_deref()).await;
 
+                let telegram_id = q.from.id.0 as i64;
+                let lang = User::find_by_telegram_id(&pool, telegram_id).await
+                    .map(|u| u.lang().to_string())
+                    .unwrap_or_else(|| "en".to_string());
+
                 if let Some(task) = Task::find_by_id(&pool, task_id).await {
                     if let Some(msg) = &q.message {
                         let due_str = task.due_at.as_ref()
@@ -2874,7 +2898,7 @@ pub async fn callback_handler(
                             msg.id(),
                             format!("{}\n\n📝 {}{}", reminder_msg, task.title, due_str),
                         )
-                        .reply_markup(task_keyboard(task_id))
+                        .reply_markup(task_keyboard(task_id, &i18n, &lang))
                         .await?;
                     }
                 }
