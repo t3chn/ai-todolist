@@ -1,3 +1,4 @@
+use crate::i18n::I18n;
 use crate::models::{Task, User};
 use chrono::Timelike;
 use sqlx::SqlitePool;
@@ -6,7 +7,7 @@ use std::time::Duration;
 use teloxide::prelude::*;
 use teloxide::types::{ChatId, InlineKeyboardButton, InlineKeyboardMarkup};
 
-pub async fn start_morning_brief_loop(bot: Bot, pool: Arc<SqlitePool>) {
+pub async fn start_morning_brief_loop(bot: Bot, pool: Arc<SqlitePool>, _i18n: Arc<I18n>) {
     tracing::info!("Starting morning brief service...");
 
     loop {

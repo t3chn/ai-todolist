@@ -25,6 +25,8 @@ pub struct User {
     pub banned_at: Option<String>,
     pub ban_reason: Option<String>,
     pub last_active_at: Option<String>,
+    // Language preference (en, ru)
+    pub language: Option<String>,
 }
 
 impl User {
@@ -212,6 +214,23 @@ impl User {
         .execute(pool)
         .await?;
         Ok(())
+    }
+
+    /// Update language preference
+    pub async fn update_language(pool: &SqlitePool, id: i64, language: &str) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "UPDATE users SET language = ?, updated_at = datetime('now') WHERE id = ?"
+        )
+        .bind(language)
+        .bind(id)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Get language code (defaults to "en")
+    pub fn lang(&self) -> &str {
+        self.language.as_deref().unwrap_or("en")
     }
 
     /// Generate and set referral code for user

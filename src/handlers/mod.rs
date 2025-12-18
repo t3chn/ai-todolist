@@ -498,6 +498,7 @@ Try it now ↑
                                 InlineKeyboardButton::callback("⏰ Brief time", "settings:brief_time"),
                             ],
                             vec![
+                                InlineKeyboardButton::callback("🌐 Language", "settings:language"),
                                 InlineKeyboardButton::callback("🎁 Invite friends", "settings:invite"),
                             ],
                         ];
@@ -510,16 +511,23 @@ Try it now ↑
 
                         let settings_keyboard = InlineKeyboardMarkup::new(keyboard_rows);
 
+                        let lang_display = match user.lang() {
+                            "ru" => "🇷🇺 Русский",
+                            _ => "🇬🇧 English",
+                        };
+
                         bot.send_message(
                             msg.chat.id,
                             format!(
                                 "⚙️ <b>Settings</b>\n\n\
                                 📊 Status: {}\n\
                                 🌍 Timezone: {}\n\
-                                ⏰ Morning brief: {}",
+                                ⏰ Morning brief: {}\n\
+                                🌐 Language: {}",
                                 user.subscription_status(),
                                 user.timezone,
-                                user.morning_brief_time
+                                user.morning_brief_time,
+                                lang_display
                             ),
                         )
                         .parse_mode(teloxide::types::ParseMode::Html)
@@ -2282,6 +2290,51 @@ pub async fn callback_handler(
 
             bot.answer_callback_query(q.id).text("✅ Brief time updated").await?;
         }
+    } else if data == "settings:language" {
+        // Show language options
+        let lang_keyboard = InlineKeyboardMarkup::new(vec![
+            vec![
+                InlineKeyboardButton::callback("🇬🇧 English", "lang:en"),
+                InlineKeyboardButton::callback("🇷🇺 Русский", "lang:ru"),
+            ],
+            vec![
+                InlineKeyboardButton::callback("↩️ Back", "settings:back"),
+            ],
+        ]);
+
+        if let Some(msg) = &q.message {
+            bot.edit_message_text(
+                msg.chat().id,
+                msg.id(),
+                "🌐 Select language / Выберите язык:",
+            )
+            .reply_markup(lang_keyboard)
+            .await?;
+        }
+
+        bot.answer_callback_query(q.id).await?;
+    } else if let Some(lang) = data.strip_prefix("lang:") {
+        // Set language
+        let telegram_id = q.from.id.0 as i64;
+        if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
+            let _ = User::update_language(&pool, user.id, lang).await;
+
+            let confirmation = match lang {
+                "ru" => "✅ Язык изменён на Русский",
+                _ => "✅ Language changed to English",
+            };
+
+            if let Some(msg) = &q.message {
+                bot.edit_message_text(
+                    msg.chat().id,
+                    msg.id(),
+                    confirmation,
+                )
+                .await?;
+            }
+
+            bot.answer_callback_query(q.id).text("✅").await?;
+        }
     } else if data == "settings:back" {
         // Back to settings - redirect to settings handler
         let telegram_id = q.from.id.0 as i64;
@@ -2295,6 +2348,7 @@ pub async fn callback_handler(
                     InlineKeyboardButton::callback("⏰ Brief time", "settings:brief_time"),
                 ],
                 vec![
+                    InlineKeyboardButton::callback("🌐 Language", "settings:language"),
                     InlineKeyboardButton::callback("🎁 Invite friends", "settings:invite"),
                 ],
             ];
@@ -2307,6 +2361,11 @@ pub async fn callback_handler(
 
             let settings_keyboard = InlineKeyboardMarkup::new(keyboard_rows);
 
+            let lang_display = match user.lang() {
+                "ru" => "🇷🇺 Русский",
+                _ => "🇬🇧 English",
+            };
+
             if let Some(msg) = &q.message {
                 bot.edit_message_text(
                     msg.chat().id,
@@ -2315,10 +2374,12 @@ pub async fn callback_handler(
                         "⚙️ <b>Settings</b>\n\n\
                         📊 Status: {}\n\
                         🌍 Timezone: {}\n\
-                        ⏰ Morning brief: {}",
+                        ⏰ Morning brief: {}\n\
+                        🌐 Language: {}",
                         user.subscription_status(),
                         user.timezone,
-                        user.morning_brief_time
+                        user.morning_brief_time,
+                        lang_display
                     ),
                 )
                 .parse_mode(teloxide::types::ParseMode::Html)
@@ -2374,6 +2435,7 @@ pub async fn callback_handler(
                     InlineKeyboardButton::callback("⏰ Brief time", "settings:brief_time"),
                 ],
                 vec![
+                    InlineKeyboardButton::callback("🌐 Language", "settings:language"),
                     InlineKeyboardButton::callback("🎁 Invite friends", "settings:invite"),
                 ],
             ];
@@ -2386,6 +2448,11 @@ pub async fn callback_handler(
 
             let settings_keyboard = InlineKeyboardMarkup::new(keyboard_rows);
 
+            let lang_display = match user.lang() {
+                "ru" => "🇷🇺 Русский",
+                _ => "🇬🇧 English",
+            };
+
             if let Some(msg) = &q.message {
                 bot.edit_message_text(
                     msg.chat().id,
@@ -2394,10 +2461,12 @@ pub async fn callback_handler(
                         "⚙️ <b>Settings</b>\n\n\
                         📊 Status: {}\n\
                         🌍 Timezone: {}\n\
-                        ⏰ Morning brief: {}",
+                        ⏰ Morning brief: {}\n\
+                        🌐 Language: {}",
                         user.subscription_status(),
                         user.timezone,
-                        user.morning_brief_time
+                        user.morning_brief_time,
+                        lang_display
                     ),
                 )
                 .parse_mode(teloxide::types::ParseMode::Html)

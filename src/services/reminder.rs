@@ -1,3 +1,4 @@
+use crate::i18n::I18n;
 use crate::models::Task;
 use chrono::{NaiveDateTime, Utc};
 use sqlx::SqlitePool;
@@ -16,7 +17,7 @@ fn reminder_keyboard(task_id: i64) -> InlineKeyboardMarkup {
     ])
 }
 
-pub async fn start_reminder_loop(bot: Bot, pool: Arc<SqlitePool>) {
+pub async fn start_reminder_loop(bot: Bot, pool: Arc<SqlitePool>, _i18n: Arc<I18n>) {
     tracing::info!("Starting reminder service...");
 
     loop {

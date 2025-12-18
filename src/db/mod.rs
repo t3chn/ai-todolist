@@ -43,6 +43,22 @@ pub async fn init_pool(database_url: &str) -> Result<SqlitePool, sqlx::Error> {
         }
     }
 
+    // Run admin migration
+    for stmt in include_str!("../../migrations/005_admin.sql").split(';') {
+        let stmt = stmt.trim();
+        if !stmt.is_empty() {
+            let _ = sqlx::query(stmt).execute(&pool).await;
+        }
+    }
+
+    // Run language migration
+    for stmt in include_str!("../../migrations/006_language.sql").split(';') {
+        let stmt = stmt.trim();
+        if !stmt.is_empty() {
+            let _ = sqlx::query(stmt).execute(&pool).await;
+        }
+    }
+
     tracing::info!("Database initialized");
     Ok(pool)
 }

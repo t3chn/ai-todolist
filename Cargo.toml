@@ -15,6 +15,10 @@ rand = "0.8"
 dotenvy = "0.15"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+fluent = "0.16"
+fluent-bundle = "0.15"
+unic-langid = "0.9"
+intl-memoizer = "0.5"
 
 [profile.release]
 opt-level = "z"
