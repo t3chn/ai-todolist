@@ -1,5 +1,7 @@
+use crate::i18n::I18n;
 use crate::models::{Task, TaskStatus, User};
 use crate::services::{AiService, ConversationContext, ParsedInput, PendingEdit, PendingTask, ProposedEdit, RateLimiter, RateLimits};
+use fluent::FluentArgs;
 use chrono::Utc;
 use sqlx::SqlitePool;
 use std::sync::Arc;
@@ -195,6 +197,7 @@ pub async fn message_handler(
     pool: Arc<SqlitePool>,
     ai_service: Option<Arc<AiService>>,
     context: Arc<ConversationContext>,
+    i18n: Arc<I18n>,
 ) -> ResponseResult<()> {
     let text = msg.text().unwrap_or_default();
     let telegram_user = msg.from.as_ref();
@@ -313,9 +316,11 @@ pub async fn message_handler(
                         ).await, false)
                     };
 
+                    let lang = if let Ok(ref u) = user { u.lang() } else { "en" };
+
                     let trial_info = if let Ok(ref u) = user {
                         if let Some(days) = u.trial_days_remaining() {
-                            format!("✨ {} days free", days)
+                            i18n.t(lang, "welcome-trial")
                         } else {
                             String::new()
                         }
@@ -324,29 +329,27 @@ pub async fn message_handler(
                     };
 
                     let referral_bonus = if is_new_referral {
-                        " · +7 bonus!"
+                        format!("\n{}", i18n.t(lang, "welcome-referral-bonus"))
                     } else {
-                        ""
+                        String::new()
                     };
 
                     let welcome_keyboard = InlineKeyboardMarkup::new(vec![
                         vec![
-                            InlineKeyboardButton::callback("⚙️ Settings", "settings"),
+                            InlineKeyboardButton::callback(
+                                &i18n.t(lang, "btn-settings"),
+                                "settings"
+                            ),
                         ],
                     ]);
 
+                    let mut args = FluentArgs::new();
+                    args.set("name", tg_user.first_name.clone());
+                    let welcome_text = i18n.t_args(lang, "welcome", &args);
+
                     bot.send_message(
                         msg.chat.id,
-                        format!(
-"<b>{}</b>, welcome
-
-I'm your AI task assistant.
-Text or voice — I'll understand.
-
-<code>Call mom tomorrow at 5pm</code>
-Try it now ↑
-
-{}{}", tg_user.first_name, trial_info, referral_bonus),
+                        format!("{}\n\n{}{}", welcome_text, trial_info, referral_bonus),
                     )
                     .parse_mode(teloxide::types::ParseMode::Html)
                     .reply_markup(welcome_keyboard)
@@ -366,10 +369,11 @@ Try it now ↑
             Command::Tasks => {
                 if let Some(tg_user) = telegram_user {
                     if let Some(user) = User::find_by_telegram_id(&pool, tg_user.id.0 as i64).await {
+                        let lang = user.lang();
                         let tasks = Task::find_pending_by_user(&pool, user.id).await.unwrap_or_default();
 
                         if tasks.is_empty() {
-                            bot.send_message(msg.chat.id, "📋 No tasks yet!\n\nSend me a message to create one.")
+                            bot.send_message(msg.chat.id, i18n.t(lang, "tasks-empty"))
                                 .await?;
                         } else {
                             // Check for stale tasks first
@@ -1792,6 +1796,7 @@ pub async fn callback_handler(
     q: CallbackQuery,
     pool: Arc<SqlitePool>,
     context: Arc<ConversationContext>,
+    i18n: Arc<I18n>,
 ) -> ResponseResult<()> {
     let data = q.data.unwrap_or_default();
 

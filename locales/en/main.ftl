@@ -178,6 +178,7 @@ tag-finance = 💰 Finance
 tag-other = 📌 Other
 
 # === Buttons ===
+btn-settings = ⚙️ Settings
 btn-done = ✅ Done
 btn-delete = 🗑 Delete
 btn-edit = ✏️ Edit
