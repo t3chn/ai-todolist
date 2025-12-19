@@ -56,13 +56,24 @@ reminder-due = Срок: { $due }
 
 # === Morning Brief ===
 brief-title = ☀️ <b>Доброе утро!</b>
+brief-greeting-morning = 👋 Доброе утро, { $name }!
+brief-greeting-afternoon = 👋 Добрый день, { $name }!
+brief-greeting-evening = 👋 Добрый вечер, { $name }!
 brief-tasks-count = У тебя <b>{ $count }</b> { $count ->
     [one] задача
     [few] задачи
     *[other] задач
 } на сегодня:
-brief-no-tasks = На сегодня задач нет. Хорошего дня! 🌟
+brief-today-header = 📅 Задачи на сегодня ({ $count }):
+brief-no-tasks = 📅 На сегодня задач нет.
+brief-other-pending = 📋 Ещё { $count } { $count ->
+    [one] задача
+    [few] задачи
+    *[other] задач
+} в ожидании
+brief-outro = Продуктивного дня! 🚀
 brief-tip = 💡 Отправь голосовое сообщение, чтобы быстро добавить задачу!
+btn-view-tasks = 📋 Задачи
 
 # === Weekly Review ===
 weekly-title = 📊 <b>Итоги недели</b>

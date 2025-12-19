@@ -56,12 +56,22 @@ reminder-due = Due: { $due }
 
 # === Morning Brief ===
 brief-title = ☀️ <b>Good morning!</b>
+brief-greeting-morning = 👋 Good morning, { $name }!
+brief-greeting-afternoon = 👋 Good afternoon, { $name }!
+brief-greeting-evening = 👋 Good evening, { $name }!
 brief-tasks-count = You have <b>{ $count }</b> { $count ->
     [one] task
     *[other] tasks
 } for today:
-brief-no-tasks = No tasks scheduled for today. Have a great day! 🌟
+brief-today-header = 📅 Today's tasks ({ $count }):
+brief-no-tasks = 📅 No tasks scheduled for today.
+brief-other-pending = 📋 { $count } other pending { $count ->
+    [one] task
+    *[other] tasks
+}
+brief-outro = Have a productive day! 🚀
 brief-tip = 💡 Send me a voice message to quickly add tasks!
+btn-view-tasks = 📋 View tasks
 
 # === Weekly Review ===
 weekly-title = 📊 <b>Weekly Review</b>
