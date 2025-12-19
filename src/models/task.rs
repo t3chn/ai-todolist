@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
-/// Task with user's telegram_id for reminders
+/// Task with user's telegram_id and language for reminders
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct TaskWithTelegramId {
     pub id: i64,
@@ -15,6 +15,7 @@ pub struct TaskWithTelegramId {
     pub created_at: String,
     pub updated_at: String,
     pub telegram_id: i64,
+    pub language: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -146,7 +147,7 @@ impl Task {
     pub async fn find_due_reminders(pool: &SqlitePool) -> Result<Vec<TaskWithTelegramId>, sqlx::Error> {
         sqlx::query_as::<_, TaskWithTelegramId>(
             r#"
-            SELECT t.id, t.user_id, t.title, t.description, t.status, t.due_at, t.reminder_at, t.tags, t.created_at, t.updated_at, u.telegram_id
+            SELECT t.id, t.user_id, t.title, t.description, t.status, t.due_at, t.reminder_at, t.tags, t.created_at, t.updated_at, u.telegram_id, u.language
             FROM tasks t
             JOIN users u ON t.user_id = u.id
             WHERE t.reminder_at IS NOT NULL

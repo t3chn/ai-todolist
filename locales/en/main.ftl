@@ -52,7 +52,10 @@ task-reminder-snoozed = ⏰ Reminder snoozed: { $title }
 # === Reminders ===
 reminder-title = ⏰ <b>Reminder</b>
 reminder-task = { $title }
-reminder-due = Due: { $due }
+reminder-due = 📅 Due: { $due }
+reminder-urgent = 🔴 Due very soon!
+reminder-soon = 🟡 Due in 30 minutes
+reminder-normal = ⏰ Reminder
 
 # === Morning Brief ===
 brief-title = ☀️ <b>Good morning!</b>
