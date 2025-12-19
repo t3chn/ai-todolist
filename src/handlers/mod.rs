@@ -374,17 +374,17 @@ pub async fn message_handler(
                             if !stale_tasks.is_empty() {
                                 let stale_keyboard = InlineKeyboardMarkup::new(vec![
                                     vec![
-                                        InlineKeyboardButton::callback("📋 Review", "stale:review"),
-                                        InlineKeyboardButton::callback("✓ Keep all", "stale:keep"),
+                                        InlineKeyboardButton::callback(&i18n.t(lang, "btn-stale-review"), "stale:review"),
+                                        InlineKeyboardButton::callback(&i18n.t(lang, "btn-stale-keep-all"), "stale:keep"),
                                     ]
                                 ]);
 
+                                let mut args = FluentArgs::new();
+                                args.set("count", stale_tasks.len() as i64);
+
                                 bot.send_message(
                                     msg.chat.id,
-                                    format!("⚠️ {} task{} not updated in 7+ days",
-                                        stale_tasks.len(),
-                                        if stale_tasks.len() == 1 { "" } else { "s" }
-                                    ),
+                                    i18n.t_args(lang, "stale-warning-inline", &args),
                                 )
                                 .reply_markup(stale_keyboard)
                                 .await?;
@@ -1261,6 +1261,7 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                     match ai.parse_task_edit(&task.title, text, &current_date).await {
                                         Ok(parsed) => {
                                             // Show preview and ask for confirmation
+                                            let lang = user.lang();
                                             let proposed = ProposedEdit {
                                                 task_id,
                                                 old_title: task.title.clone(),
@@ -1272,27 +1273,38 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                             context.set_pending_edit(user.id, PendingEdit::ConfirmEdit(proposed.clone()));
 
                                             let due_change = match (&task.due_at, &parsed.due_at) {
-                                                (Some(old), Some(new)) if old != new => format!("\n📅 {} → {}", old, new),
-                                                (None, Some(new)) => format!("\n📅 → {}", new),
-                                                (Some(old), None) => format!("\n📅 {} → ❌", old),
+                                                (Some(old), Some(new)) if old != new => {
+                                                    let mut args = FluentArgs::new();
+                                                    args.set("old", old.clone());
+                                                    args.set("new", new.clone());
+                                                    format!("\n{}", i18n.t_args(lang, "due-change-update", &args))
+                                                }
+                                                (None, Some(new)) => {
+                                                    let mut args = FluentArgs::new();
+                                                    args.set("new", new.clone());
+                                                    format!("\n{}", i18n.t_args(lang, "due-change-new", &args))
+                                                }
+                                                (Some(old), None) => {
+                                                    let mut args = FluentArgs::new();
+                                                    args.set("old", old.clone());
+                                                    format!("\n{}", i18n.t_args(lang, "due-change-remove", &args))
+                                                }
                                                 _ => String::new(),
                                             };
 
                                             let confirm_keyboard = InlineKeyboardMarkup::new(vec![vec![
-                                                InlineKeyboardButton::callback("✅ Apply", format!("confirm_edit:{}", task_id)),
-                                                InlineKeyboardButton::callback("❌ Cancel", format!("cancel_edit:{}", task_id)),
+                                                InlineKeyboardButton::callback(&i18n.t(lang, "btn-apply"), format!("confirm_edit:{}", task_id)),
+                                                InlineKeyboardButton::callback(&i18n.t(lang, "btn-cancel"), format!("cancel_edit:{}", task_id)),
                                             ]]);
+
+                                            let mut args = FluentArgs::new();
+                                            args.set("old_title", task.title.clone());
+                                            args.set("new_title", parsed.title.clone());
+                                            args.set("due_change", due_change.clone());
 
                                             bot.send_message(
                                                 msg.chat.id,
-                                                format!(
-                                                    "📝 <b>Preview:</b>\n\n\
-                                                    <s>{}</s>\n\
-                                                    ↓\n\
-                                                    <b>{}</b>{}\n\n\
-                                                    Apply?",
-                                                    task.title, parsed.title, due_change
-                                                ),
+                                                i18n.t_args(lang, "edit-preview-text", &args),
                                             )
                                             .parse_mode(teloxide::types::ParseMode::Html)
                                             .reply_markup(confirm_keyboard)
@@ -1310,7 +1322,9 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                 } else {
                                     // No AI - just replace title
                                     let _ = Task::update(&pool, task_id, Some(text), None).await;
-                                    bot.send_message(msg.chat.id, format!("✅ Updated: {}", text)).await?;
+                                    let mut args = FluentArgs::new();
+                                    args.set("title", text.to_string());
+                                    bot.send_message(msg.chat.id, i18n.t_args(user.lang(), "task-updated-simple", &args)).await?;
                                 }
                             } else {
                                 bot.send_message(msg.chat.id, i18n.t(user.lang(), "error-not-found")).await?;
@@ -1337,11 +1351,16 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                         let _ = Task::set_reminder(&pool, task_id, Some(&reminder_at)).await;
 
                                         if let Some(task) = Task::find_by_id(&pool, task_id).await {
+                                            let lang = user.lang();
+                                            let mut args = FluentArgs::new();
+                                            args.set("title", task.title.clone());
+                                            args.set("reminder", reminder_at.clone());
+
                                             bot.send_message(
                                                 msg.chat.id,
-                                                format!("⏰ Reminder set!\n\n📝 {}\n🔔 {}", task.title, reminder_at),
+                                                i18n.t_args(lang, "reminder-set-confirm", &args),
                                             )
-                                            .reply_markup(task_keyboard(task_id, &i18n, user.lang()))
+                                            .reply_markup(task_keyboard(task_id, &i18n, lang))
                                             .await?;
                                         }
                                     }
@@ -1369,9 +1388,12 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                     Ok(timezone) => {
                                         let _ = User::update_timezone(&pool, user.id, &timezone).await;
 
+                                        let mut args = FluentArgs::new();
+                                        args.set("timezone", timezone.clone());
+
                                         bot.send_message(
                                             msg.chat.id,
-                                            format!("✅ Timezone set to: {}\n\nYour reminders will now use this timezone.", timezone),
+                                            i18n.t_args(user.lang(), "timezone-set-success", &args),
                                         )
                                         .reply_markup(KeyboardRemove::new())
                                         .await?;
@@ -2841,17 +2863,21 @@ pub async fn callback_handler(
                             .map(|d| format!("\n📅 {}", d))
                             .unwrap_or_default();
 
+                        let mut args = FluentArgs::new();
+                        args.set("title", task.title.clone());
+                        args.set("due", due_str.clone());
+
                         bot.edit_message_text(
                             msg.chat().id,
                             msg.id(),
-                            format!("✅ Updated!\n\n📝 {}{}", task.title, due_str),
+                            i18n.t_args(&lang, "date-updated-confirm", &args),
                         )
                         .reply_markup(task_keyboard(task_id, &i18n, &lang))
                         .await?;
                     }
                 }
 
-                bot.answer_callback_query(q.id).text("✅ Date updated").await?;
+                bot.answer_callback_query(q.id).text(&i18n.t(&lang, "date-updated")).await?;
             }
         }
     } else if let Some(task_id_str) = data.strip_prefix("remind:") {
@@ -2864,7 +2890,11 @@ pub async fn callback_handler(
                     .unwrap_or_else(|| "en".to_string());
 
                 let reminder_str = task.reminder_at.as_ref()
-                    .map(|r| format!("🔔 Current: {}", r))
+                    .map(|r| {
+                        let mut args = FluentArgs::new();
+                        args.set("reminder", r.clone());
+                        i18n.t_args(&lang, "reminder-current", &args)
+                    })
                     .unwrap_or_else(|| i18n.t(&lang, "no-reminder"));
 
                 let remind_keyboard = InlineKeyboardMarkup::new(vec![

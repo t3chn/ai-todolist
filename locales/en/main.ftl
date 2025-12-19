@@ -525,6 +525,36 @@ edit-preview-voice = 🎤 "{ $text }"
 
     Apply?
 
+# === Task Display ===
+task-display = 📝 { $title }{ $due }{ $reminder }
+task-display-due = 📅 { $due }
+task-display-reminder = 🔔 Reminder: { $reminder }
+reminder-current = 🔔 Current: { $reminder }
+
+# === Edit Preview (text) ===
+edit-preview-text = 📝 <b>Preview:</b>
+
+    <s>{ $old_title }</s>
+    ↓
+    <b>{ $new_title }</b>{ $due_change }
+
+    Apply?
+
+# === Due Date Changes ===
+due-change-new = 📅 → { $new }
+due-change-update = 📅 { $old } → { $new }
+due-change-remove = 📅 { $old } → ❌
+
+# === Task Update Confirmations ===
+task-updated-simple = ✅ Updated: { $title }
+reminder-set-confirm = ⏰ Reminder set!
+
+    📝 { $title }
+    🔔 { $reminder }
+date-updated-confirm = ✅ Updated!
+
+    📝 { $title }{ $due }
+
 # === Admin ===
 admin-title = 🔧 <b>Admin Panel</b>
 admin-stats = 📊 <b>Statistics</b>
