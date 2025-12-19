@@ -66,15 +66,29 @@ brief-tip = 💡 Отправь голосовое сообщение, чтоб�
 
 # === Weekly Review ===
 weekly-title = 📊 <b>Итоги недели</b>
+weekly-greeting = Привет, { $name }!
+weekly-this-week = На этой неделе:
 weekly-completed = ✅ Выполнено: <b>{ $count }</b> { $count ->
     [one] задача
     [few] задачи
     *[other] задач
 }
-weekly-created = 📝 Создано: <b>{ $count }</b>
-weekly-pending = ⏳ В ожидании: <b>{ $count }</b>
+weekly-created = ➕ Добавлено: <b>{ $count }</b>
+weekly-pending = 📋 В ожидании: <b>{ $count }</b>
 weekly-great-job = 🎉 Отличная работа на этой неделе!
 weekly-keep-going = 💪 Так держать!
+weekly-celebrate-good = Хороший прогресс! 👍
+weekly-celebrate-great = Отличная неделя! 🔥
+weekly-celebrate-productive = Продуктивная неделя! ⚡
+weekly-celebrate-incredible = Невероятная продуктивность! 🏆
+weekly-stale-warning = ⚠️ { $count } { $count ->
+    [one] задача устарела
+    [few] задачи устарели
+    *[other] задач устарели
+} (7+ дней). Пора проверить?
+weekly-outro = Отличной недели! 🚀
+btn-review-stale = 📋 Проверить
+btn-view-all = 📊 Все задачи
 
 # === Settings ===
 settings-title = ⚙️ <b>Настройки</b>

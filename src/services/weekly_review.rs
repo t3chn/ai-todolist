@@ -1,17 +1,18 @@
 use crate::i18n::I18n;
 use crate::models::{Task, User};
 use chrono::{Datelike, Timelike, Weekday};
+use fluent::FluentArgs;
 use sqlx::SqlitePool;
 use std::sync::Arc;
 use std::time::Duration;
 use teloxide::prelude::*;
 use teloxide::types::{ChatId, InlineKeyboardButton, InlineKeyboardMarkup};
 
-pub async fn start_weekly_review_loop(bot: Bot, pool: Arc<SqlitePool>, _i18n: Arc<I18n>) {
+pub async fn start_weekly_review_loop(bot: Bot, pool: Arc<SqlitePool>, i18n: Arc<I18n>) {
     tracing::info!("Starting weekly review service...");
 
     loop {
-        if let Err(e) = check_and_send_reviews(&bot, &pool).await {
+        if let Err(e) = check_and_send_reviews(&bot, &pool, &i18n).await {
             tracing::error!("Weekly review check failed: {}", e);
         }
 
@@ -20,7 +21,7 @@ pub async fn start_weekly_review_loop(bot: Bot, pool: Arc<SqlitePool>, _i18n: Ar
     }
 }
 
-async fn check_and_send_reviews(bot: &Bot, pool: &SqlitePool) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+async fn check_and_send_reviews(bot: &Bot, pool: &SqlitePool, i18n: &I18n) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let now = chrono::Utc::now();
 
     // Only run on Sundays at 18:00 UTC
@@ -38,16 +39,18 @@ async fn check_and_send_reviews(bot: &Bot, pool: &SqlitePool) -> Result<(), Box<
             continue;
         }
 
-        let review = generate_weekly_review(pool, &user).await?;
+        let lang = user.lang();
+        let review = generate_weekly_review(pool, &user, i18n, lang).await?;
 
         let keyboard = InlineKeyboardMarkup::new(vec![
             vec![
-                InlineKeyboardButton::callback("📋 Review stale", "stale:review"),
-                InlineKeyboardButton::callback("📊 View all", "view_tasks"),
+                InlineKeyboardButton::callback(&i18n.t(lang, "btn-review-stale"), "stale:review"),
+                InlineKeyboardButton::callback(&i18n.t(lang, "btn-view-all"), "view_tasks"),
             ]
         ]);
 
         if let Err(e) = bot.send_message(ChatId(user.telegram_id), review)
+            .parse_mode(teloxide::types::ParseMode::Html)
             .reply_markup(keyboard)
             .await
         {
@@ -60,7 +63,7 @@ async fn check_and_send_reviews(bot: &Bot, pool: &SqlitePool) -> Result<(), Box<
     Ok(())
 }
 
-async fn generate_weekly_review(pool: &SqlitePool, user: &User) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+async fn generate_weekly_review(pool: &SqlitePool, user: &User, i18n: &I18n, lang: &str) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let completed = Task::count_completed_week(pool, user.id).await;
     let created = Task::count_created_week(pool, user.id).await;
     let pending = Task::count_pending(pool, user.id).await;
@@ -68,35 +71,49 @@ async fn generate_weekly_review(pool: &SqlitePool, user: &User) -> Result<String
 
     let name = user.first_name.as_deref().unwrap_or("there");
 
-    let mut message = format!("📊 Weekly Review for {}\n\n", name);
+    // Title
+    let mut message = format!("{}\n", i18n.t(lang, "weekly-title"));
+
+    // Greeting
+    let mut args = FluentArgs::new();
+    args.set("name", name.to_string());
+    message.push_str(&format!("{}\n\n", i18n.t_args(lang, "weekly-greeting", &args)));
+
+    // "This week:" header
+    message.push_str(&format!("{}\n", i18n.t(lang, "weekly-this-week")));
 
     // Stats
-    message.push_str("This week:\n");
-    message.push_str(&format!("✅ Completed: {}\n", completed));
-    message.push_str(&format!("➕ Added: {}\n", created));
-    message.push_str(&format!("📋 Pending: {}\n", pending));
+    let mut count_args = FluentArgs::new();
+    count_args.set("count", completed as i64);
+    message.push_str(&format!("{}\n", i18n.t_args(lang, "weekly-completed", &count_args)));
+
+    count_args = FluentArgs::new();
+    count_args.set("count", created as i64);
+    message.push_str(&format!("{}\n", i18n.t_args(lang, "weekly-created", &count_args)));
+
+    count_args = FluentArgs::new();
+    count_args.set("count", pending as i64);
+    message.push_str(&format!("{}\n", i18n.t_args(lang, "weekly-pending", &count_args)));
 
     // Celebration based on completion rate
     if completed > 0 {
-        let celebration = match completed {
-            1..=4 => "Good progress! 👍",
-            5..=9 => "Great week! 🔥",
-            10..=19 => "Productive week! ⚡",
-            _ => "Incredible productivity! 🏆",
+        let celebration_key = match completed {
+            1..=4 => "weekly-celebrate-good",
+            5..=9 => "weekly-celebrate-great",
+            10..=19 => "weekly-celebrate-productive",
+            _ => "weekly-celebrate-incredible",
         };
-        message.push_str(&format!("\n{}\n", celebration));
+        message.push_str(&format!("\n{}\n", i18n.t(lang, celebration_key)));
     }
 
     // Stale warning
     if stale > 0 {
-        message.push_str(&format!(
-            "\n⚠️ {} task{} stale (7+ days). Time to review?\n",
-            stale,
-            if stale == 1 { "" } else { "s" }
-        ));
+        let mut stale_args = FluentArgs::new();
+        stale_args.set("count", stale as i64);
+        message.push_str(&format!("\n{}\n", i18n.t_args(lang, "weekly-stale-warning", &stale_args)));
     }
 
-    message.push_str("\nHave a great week ahead! 🚀");
+    message.push_str(&format!("\n{}", i18n.t(lang, "weekly-outro")));
 
     Ok(message)
 }

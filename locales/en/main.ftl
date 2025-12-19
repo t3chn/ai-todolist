@@ -65,14 +65,27 @@ brief-tip = 💡 Send me a voice message to quickly add tasks!
 
 # === Weekly Review ===
 weekly-title = 📊 <b>Weekly Review</b>
+weekly-greeting = Hi { $name }!
+weekly-this-week = This week:
 weekly-completed = ✅ Completed: <b>{ $count }</b> { $count ->
     [one] task
     *[other] tasks
 }
-weekly-created = 📝 Created: <b>{ $count }</b>
-weekly-pending = ⏳ Pending: <b>{ $count }</b>
+weekly-created = ➕ Added: <b>{ $count }</b>
+weekly-pending = 📋 Pending: <b>{ $count }</b>
 weekly-great-job = 🎉 Great job this week!
 weekly-keep-going = 💪 Keep going!
+weekly-celebrate-good = Good progress! 👍
+weekly-celebrate-great = Great week! 🔥
+weekly-celebrate-productive = Productive week! ⚡
+weekly-celebrate-incredible = Incredible productivity! 🏆
+weekly-stale-warning = ⚠️ { $count } { $count ->
+    [one] task is
+    *[other] tasks are
+} stale (7+ days). Time to review?
+weekly-outro = Have a great week ahead! 🚀
+btn-review-stale = 📋 Review stale
+btn-view-all = 📊 View all
 
 # === Settings ===
 settings-title = ⚙️ <b>Settings</b>
