@@ -437,6 +437,94 @@ ai-today-header = 📅 Today ({ $count } { $count ->
 }):
 ai-unknown-command = 🤖 Unknown command
 
+# === Voice Transcription Responses ===
+voice-transcribed = 🎤 "{ $text }"
+voice-transcribed-added = 🎤 "{ $text }"
+
+    ✅ Added!
+
+    📝 { $title }{ $due }
+voice-transcribed-error = 🎤 "{ $text }"
+
+    ❌ Couldn't understand
+
+    💡 Try: "change time to 5pm"
+voice-transcribed-reminder-set = 🎤 "{ $text }"
+
+    ⏰ Reminder set!
+
+    📝 { $title }
+    🔔 { $reminder }
+voice-transcribed-reminder-failed = 🎤 "{ $text }"
+
+    ❌ Couldn't understand the time
+
+    💡 Try: "tomorrow at 9" or "in 2 hours"
+voice-transcribed-timezone-set = 🎤 "{ $text }"
+
+    ✅ Timezone set to: { $timezone }
+voice-transcribed-timezone-failed = 🎤 "{ $text }"
+
+    ❌ Couldn't determine timezone
+
+    💡 Try a major city name
+voice-transcribed-support-sent = 🎤 "{ $text }"
+
+    ✅ Message sent to support!
+voice-transcribed-support-failed = ❌ Failed to send message. Please try again.
+voice-transcribed-draft = 🎤 "{ $text }"
+
+    ✉️ Draft for { $recipient }:
+
+    { $draft }
+
+    💡 Copy and send!
+voice-transcribed-clarify = 🎤 "{ $text }"
+
+    🤔 { $question }
+
+    Pick a specific action:
+voice-transcribed-unknown = 🎤 "{ $text }"
+
+    🤖 { $reason }
+voice-task-create-failed = ❌ Couldn't create task
+
+    Something went wrong.
+
+    💡 Try typing your task instead
+
+# === Support Flow ===
+support-sent-success = ✅ Message sent to support!
+
+    We'll respond within 24 hours.
+support-failed = ❌ Failed to send message. Please try again later.
+support-unavailable = ❌ Support is temporarily unavailable.
+
+    Please try again later.
+support-cancelled = ❌ Support request cancelled.
+
+# === Stale Tasks Inline ===
+stale-warning-inline = ⚠️ { $count } { $count ->
+    [one] task
+    *[other] tasks
+} not updated in 7+ days
+
+# === Timezone ===
+timezone-set-success = ✅ Timezone set to: { $timezone }
+
+    Your reminders will now use this timezone.
+
+# === Edit Preview ===
+edit-preview-voice = 🎤 "{ $text }"
+
+    📝 <b>Preview:</b>
+
+    <s>{ $old_title }</s>
+    ↓
+    <b>{ $new_title }</b>{ $due_change }
+
+    Apply?
+
 # === Admin ===
 admin-title = 🔧 <b>Admin Panel</b>
 admin-stats = 📊 <b>Statistics</b>

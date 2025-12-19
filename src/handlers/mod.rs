@@ -537,6 +537,15 @@ pub async fn message_handler(
                 // /support [message] — send message to support
                 let support_text = text.strip_prefix("/support").map(|s| s.trim()).unwrap_or("");
 
+                // Get user language for support messages
+                let lang = if let Some(tg_user) = telegram_user {
+                    User::find_by_telegram_id(&pool, tg_user.id.0 as i64).await
+                        .map(|u| u.lang().to_string())
+                        .unwrap_or_else(|| "en".to_string())
+                } else {
+                    "en".to_string()
+                };
+
                 if support_text.is_empty() {
                     // Set pending state and ask for message
                     if let Some(tg_user) = telegram_user {
@@ -546,14 +555,12 @@ pub async fn message_handler(
                     }
 
                     let cancel_keyboard = InlineKeyboardMarkup::new(vec![vec![
-                        InlineKeyboardButton::callback("❌ Cancel", "cancel_support"),
+                        InlineKeyboardButton::callback(&i18n.t(&lang, "btn-cancel"), "cancel_support"),
                     ]]);
 
                     bot.send_message(
                         msg.chat.id,
-                        "📨 <b>Contact Support</b>\n\n\
-                        Describe your issue or question.\n\
-                        Send your message now:",
+                        i18n.t(&lang, "support-prompt"),
                     )
                     .parse_mode(teloxide::types::ParseMode::Html)
                     .reply_markup(cancel_keyboard)
@@ -583,8 +590,6 @@ pub async fn message_handler(
                         .await
                     {
                         Ok(sent_msg) => {
-                            // Store mapping: support_msg_id -> user_chat_id
-                            // For now, include user chat ID in a hidden way for reply handling
                             tracing::info!(
                                 "Support message from chat {} forwarded as msg {}",
                                 msg.chat.id, sent_msg.id
@@ -592,7 +597,7 @@ pub async fn message_handler(
 
                             bot.send_message(
                                 msg.chat.id,
-                                "✅ Message sent to support!\n\nWe'll respond within 24 hours.",
+                                i18n.t(&lang, "support-sent-success"),
                             )
                             .await?;
                         }
@@ -600,7 +605,7 @@ pub async fn message_handler(
                             tracing::error!("Failed to forward support message: {}", e);
                             bot.send_message(
                                 msg.chat.id,
-                                "❌ Failed to send message. Please try again later.",
+                                i18n.t(&lang, "support-failed"),
                             )
                             .await?;
                         }
@@ -609,7 +614,7 @@ pub async fn message_handler(
                     tracing::warn!("SUPPORT_CHAT_ID not configured");
                     bot.send_message(
                         msg.chat.id,
-                        "❌ Support is temporarily unavailable.\n\nPlease try again later.",
+                        i18n.t(&lang, "support-unavailable"),
                     )
                     .await?;
                 }
@@ -769,23 +774,22 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                                         _ => String::new(),
                                                     };
 
+                                                    let lang = user.lang();
                                                     let confirm_keyboard = InlineKeyboardMarkup::new(vec![vec![
-                                                        InlineKeyboardButton::callback("✅ Apply", format!("confirm_edit:{}", task_id)),
-                                                        InlineKeyboardButton::callback("❌ Cancel", format!("cancel_edit:{}", task_id)),
+                                                        InlineKeyboardButton::callback(&i18n.t(lang, "btn-apply"), format!("confirm_edit:{}", task_id)),
+                                                        InlineKeyboardButton::callback(&i18n.t(lang, "btn-cancel"), format!("cancel_edit:{}", task_id)),
                                                     ]]);
+
+                                                    let mut args = FluentArgs::new();
+                                                    args.set("text", transcript.clone());
+                                                    args.set("old_title", task.title.clone());
+                                                    args.set("new_title", parsed.title.clone());
+                                                    args.set("due_change", due_change.clone());
 
                                                     bot.edit_message_text(
                                                         msg.chat.id,
                                                         progress_msg.id,
-                                                        format!(
-                                                            "🎤 \"{}\"\n\n\
-                                                            📝 <b>Preview:</b>\n\n\
-                                                            <s>{}</s>\n\
-                                                            ↓\n\
-                                                            <b>{}</b>{}\n\n\
-                                                            Apply?",
-                                                            transcript, task.title, parsed.title, due_change
-                                                        ),
+                                                        i18n.t_args(lang, "edit-preview-voice", &args),
                                                     )
                                                     .parse_mode(teloxide::types::ParseMode::Html)
                                                     .reply_markup(confirm_keyboard)
@@ -793,10 +797,12 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                                 }
                                                 Err(e) => {
                                                     tracing::warn!("Failed to parse voice edit: {}", e);
+                                                    let mut args = FluentArgs::new();
+                                                    args.set("text", transcript.clone());
                                                     let _ = bot.edit_message_text(
                                                         msg.chat.id,
                                                         progress_msg.id,
-                                                        format!("🎤 \"{}\"\n\n❌ Couldn't understand\n\n💡 Try: \"change time to 5pm\"", transcript),
+                                                        i18n.t_args(user.lang(), "voice-transcribed-error", &args),
                                                     ).await;
                                                 }
                                             }
@@ -806,27 +812,35 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                     PendingEdit::Reminder(task_id) => {
                                         // Parse reminder time from transcript
                                         let current_date = Utc::now().format("%Y-%m-%d %H:%M").to_string();
+                                        let lang = user.lang();
 
                                         match ai.parse_reminder_time(&transcript, &current_date).await {
                                             Ok(reminder_at) => {
                                                 let _ = Task::set_reminder(&pool, task_id, Some(&reminder_at)).await;
 
                                                 if let Some(task) = Task::find_by_id(&pool, task_id).await {
+                                                    let mut args = FluentArgs::new();
+                                                    args.set("text", transcript.clone());
+                                                    args.set("title", task.title.clone());
+                                                    args.set("reminder", reminder_at.clone());
+
                                                     bot.edit_message_text(
                                                         msg.chat.id,
                                                         progress_msg.id,
-                                                        format!("🎤 \"{}\"\n\n⏰ Reminder set!\n\n📝 {}\n🔔 {}", transcript, task.title, reminder_at),
+                                                        i18n.t_args(lang, "voice-transcribed-reminder-set", &args),
                                                     )
-                                                    .reply_markup(task_keyboard(task_id, &i18n, user.lang()))
+                                                    .reply_markup(task_keyboard(task_id, &i18n, lang))
                                                     .await?;
                                                 }
                                             }
                                             Err(e) => {
                                                 tracing::warn!("Failed to parse reminder time: {}", e);
+                                                let mut args = FluentArgs::new();
+                                                args.set("text", transcript.clone());
                                                 let _ = bot.edit_message_text(
                                                     msg.chat.id,
                                                     progress_msg.id,
-                                                    format!("🎤 \"{}\"\n\n❌ Couldn't understand the time\n\n💡 Try: \"завтра в 9\" or \"in 2 hours\"", transcript),
+                                                    i18n.t_args(lang, "voice-transcribed-reminder-failed", &args),
                                                 ).await;
                                             }
                                         }
@@ -834,23 +848,30 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                     }
                                     PendingEdit::Timezone => {
                                         // Parse timezone from transcript
+                                        let lang = user.lang();
                                         match ai.parse_timezone(&transcript).await {
                                             Ok(timezone) => {
                                                 let _ = User::update_timezone(&pool, user.id, &timezone).await;
 
+                                                let mut args = FluentArgs::new();
+                                                args.set("text", transcript.clone());
+                                                args.set("timezone", timezone.clone());
+
                                                 bot.edit_message_text(
                                                     msg.chat.id,
                                                     progress_msg.id,
-                                                    format!("🎤 \"{}\"\n\n✅ Timezone set to: {}", transcript, timezone),
+                                                    i18n.t_args(lang, "voice-transcribed-timezone-set", &args),
                                                 )
                                                 .await?;
                                             }
                                             Err(e) => {
                                                 tracing::warn!("Failed to parse timezone: {}", e);
+                                                let mut args = FluentArgs::new();
+                                                args.set("text", transcript.clone());
                                                 let _ = bot.edit_message_text(
                                                     msg.chat.id,
                                                     progress_msg.id,
-                                                    format!("🎤 \"{}\"\n\n❌ Couldn't determine timezone\n\n💡 Try a major city name", transcript),
+                                                    i18n.t_args(lang, "voice-transcribed-timezone-failed", &args),
                                                 ).await;
                                             }
                                         }
@@ -861,12 +882,13 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                         let _ = bot.edit_message_text(
                                             msg.chat.id,
                                             progress_msg.id,
-                                            "❌ Edit cancelled. Use the buttons to confirm or cancel.",
+                                            i18n.t(user.lang(), "error-use-buttons"),
                                         ).await;
                                         return Ok(());
                                     }
                                     PendingEdit::Support => {
                                         // Voice support message
+                                        let lang = user.lang();
                                         if let Some(support_chat) = get_support_chat_id() {
                                             let user_info = if let Some(tg_user) = telegram_user {
                                                 let username = tg_user.username.as_ref()
@@ -890,10 +912,12 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                                 .await
                                             {
                                                 Ok(_) => {
+                                                    let mut args = FluentArgs::new();
+                                                    args.set("text", transcript.clone());
                                                     bot.edit_message_text(
                                                         msg.chat.id,
                                                         progress_msg.id,
-                                                        format!("🎤 \"{}\"\n\n✅ Message sent to support!", transcript),
+                                                        i18n.t_args(lang, "voice-transcribed-support-sent", &args),
                                                     )
                                                     .await?;
                                                 }
@@ -902,7 +926,7 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                                     let _ = bot.edit_message_text(
                                                         msg.chat.id,
                                                         progress_msg.id,
-                                                        "❌ Failed to send message. Please try again.",
+                                                        i18n.t(lang, "voice-transcribed-support-failed"),
                                                     ).await;
                                                 }
                                             }
@@ -910,14 +934,14 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                             let _ = bot.edit_message_text(
                                                 msg.chat.id,
                                                 progress_msg.id,
-                                                "❌ Support is temporarily unavailable.",
+                                                i18n.t(lang, "support-unavailable"),
                                             ).await;
                                         }
                                         return Ok(());
                                     }
                                     // Admin pending edits - ignore voice for these
                                     PendingEdit::AdminSearch | PendingEdit::AdminBroadcast(_) | PendingEdit::AdminMessage(_) => {
-                                        // Admin features use text only
+                                        // Admin features use text only (keep in English for admins)
                                         let _ = bot.edit_message_text(
                                             msg.chat.id,
                                             progress_msg.id,
@@ -930,7 +954,7 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                         let _ = bot.edit_message_text(
                                             msg.chat.id,
                                             progress_msg.id,
-                                            "⚠️ Please use the buttons above to confirm or cancel.",
+                                            i18n.t(user.lang(), "error-use-buttons"),
                                         ).await;
                                         return Ok(());
                                     }
@@ -966,6 +990,7 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                     let tags_str = if parsed.tags.is_empty() { None } else { Some(parsed.tags.join(",")) };
 
                                     // Check for duplicate
+                                    let lang = user.lang();
                                     if let Some(existing) = Task::find_similar(&pool, user.id, &parsed.title).await {
                                         // Store pending task and ask for confirmation
                                         context.set_pending_edit(user.id, PendingEdit::ConfirmDuplicate(PendingTask {
@@ -976,18 +1001,18 @@ Share your link and get <b>+7 days</b> for each friend who joins!
 
                                         let keyboard = InlineKeyboardMarkup::new(vec![
                                             vec![
-                                                InlineKeyboardButton::callback("✅ Create anyway", "dup:create"),
-                                                InlineKeyboardButton::callback("❌ Cancel", "dup:cancel"),
+                                                InlineKeyboardButton::callback(&i18n.t(lang, "btn-create-anyway"), "dup:create"),
+                                                InlineKeyboardButton::callback(&i18n.t(lang, "btn-cancel"), "dup:cancel"),
                                             ]
                                         ]);
+
+                                        let mut args = FluentArgs::new();
+                                        args.set("title", existing.title.clone());
 
                                         let _ = bot.edit_message_text(
                                             msg.chat.id,
                                             progress_msg.id,
-                                            format!(
-                                                "⚠️ Similar task exists:\n\n📝 \"{}\"\n\nCreate \"{}\" anyway?",
-                                                existing.title, parsed.title
-                                            ),
+                                            i18n.t_args(lang, "duplicate-warning", &args),
                                         )
                                         .reply_markup(keyboard)
                                         .await;
@@ -1004,12 +1029,17 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                                 .map(|d| format!("\n📅 {}", d))
                                                 .unwrap_or_default();
 
+                                            let mut args = FluentArgs::new();
+                                            args.set("text", transcript.clone());
+                                            args.set("title", task.title.clone());
+                                            args.set("due", due_str.clone());
+
                                             bot.edit_message_text(
                                                 msg.chat.id,
                                                 progress_msg.id,
-                                                format!("🎤 \"{}\"\n\n✅ Added!\n\n📝 {}{}", transcript, task.title, due_str),
+                                                i18n.t_args(lang, "voice-transcribed-added", &args),
                                             )
-                                            .reply_markup(task_keyboard(task.id, &i18n, user.lang()))
+                                            .reply_markup(task_keyboard(task.id, &i18n, lang))
                                             .await?;
                                         }
                                         Err(e) => {
@@ -1017,31 +1047,41 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                             let _ = bot.edit_message_text(
                                                 msg.chat.id,
                                                 progress_msg.id,
-                                                "❌ Couldn't create task\n\nSomething went wrong.\n\n💡 Try typing your task instead",
+                                                i18n.t(lang, "voice-task-create-failed"),
                                             ).await;
                                         }
                                     }
                                 }
                                 Ok(ParsedInput::Draft { recipient, context: _, draft }) => {
+                                    let mut args = FluentArgs::new();
+                                    args.set("text", transcript.clone());
+                                    args.set("recipient", recipient.clone());
+                                    args.set("draft", draft.clone());
+
                                     let _ = bot.edit_message_text(
                                         msg.chat.id,
                                         progress_msg.id,
-                                        format!("🎤 \"{}\"\n\n✉️ Draft for {}:\n\n{}\n\n💡 Copy and send!", transcript, recipient, draft),
+                                        i18n.t_args(user.lang(), "voice-transcribed-draft", &args),
                                     ).await;
                                 }
                                 Ok(ParsedInput::Clarify { original: _, question, suggestions }) => {
+                                    let lang = user.lang();
                                     // Build suggestion buttons
                                     let mut keyboard_rows: Vec<Vec<InlineKeyboardButton>> = suggestions.iter()
                                         .map(|s| vec![InlineKeyboardButton::callback(s.clone(), format!("clarify:{}", s))])
                                         .collect();
                                     keyboard_rows.push(vec![
-                                        InlineKeyboardButton::callback("📝 Create as-is", format!("clarify:asis:{}", transcript))
+                                        InlineKeyboardButton::callback(&i18n.t(lang, "btn-create-as-is"), format!("clarify:asis:{}", transcript))
                                     ]);
+
+                                    let mut args = FluentArgs::new();
+                                    args.set("text", transcript.clone());
+                                    args.set("question", question.clone());
 
                                     let _ = bot.edit_message_text(
                                         msg.chat.id,
                                         progress_msg.id,
-                                        format!("🎤 \"{}\"\n\n🤔 {}\n\nPick a specific action:", transcript, question),
+                                        i18n.t_args(lang, "voice-transcribed-clarify", &args),
                                     )
                                     .reply_markup(InlineKeyboardMarkup::new(keyboard_rows))
                                     .await;
@@ -1049,12 +1089,13 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                 Ok(ParsedInput::Command { action }) => {
                                     // Delete progress message and handle command
                                     let _ = bot.delete_message(msg.chat.id, progress_msg.id).await;
+                                    let lang = user.lang();
 
                                     match action.as_str() {
                                         "show_tasks" => {
                                             let tasks = Task::find_pending_by_user(&pool, user.id).await.unwrap_or_default();
                                             if tasks.is_empty() {
-                                                bot.send_message(msg.chat.id, "📋 No pending tasks!\n\n💡 Send a task like: \"Call mom tomorrow\"")
+                                                bot.send_message(msg.chat.id, i18n.t(lang, "ai-tasks-empty"))
                                                     .await?;
                                             } else {
                                                 for task in tasks.iter().take(10) {
@@ -1066,7 +1107,7 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                                         msg.chat.id,
                                                         format!("📝 {}{}", task.title, due_str),
                                                     )
-                                                    .reply_markup(task_keyboard(task.id, &i18n, user.lang()))
+                                                    .reply_markup(task_keyboard(task.id, &i18n, lang))
                                                     .await?;
                                                 }
                                             }
@@ -1074,7 +1115,7 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                         "show_today" => {
                                             let tasks = Task::find_today_tasks(&pool, user.id).await.unwrap_or_default();
                                             if tasks.is_empty() {
-                                                bot.send_message(msg.chat.id, "📅 No tasks for today!")
+                                                bot.send_message(msg.chat.id, i18n.t(lang, "ai-today-empty"))
                                                     .await?;
                                             } else {
                                                 for task in tasks.iter() {
@@ -1086,7 +1127,7 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                                         msg.chat.id,
                                                         format!("📝 {}{}", task.title, due_str),
                                                     )
-                                                    .reply_markup(task_keyboard(task.id, &i18n, user.lang()))
+                                                    .reply_markup(task_keyboard(task.id, &i18n, lang))
                                                     .await?;
                                                 }
                                             }
@@ -1094,44 +1135,39 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                         "settings" => {
                                             let settings_keyboard = InlineKeyboardMarkup::new(vec![
                                                 vec![
-                                                    InlineKeyboardButton::callback("🌍 Timezone", "settings:timezone"),
-                                                    InlineKeyboardButton::callback("🌅 Morning brief", "settings:brief"),
+                                                    InlineKeyboardButton::callback(&i18n.t(lang, "btn-timezone"), "settings:timezone"),
+                                                    InlineKeyboardButton::callback(&i18n.t(lang, "btn-brief-time"), "settings:brief"),
                                                 ],
                                             ]);
-                                            bot.send_message(msg.chat.id, "⚙️ Settings")
+                                            bot.send_message(msg.chat.id, i18n.t(lang, "settings-title"))
                                                 .reply_markup(settings_keyboard)
                                                 .await?;
                                         }
                                         "help" => {
-                                            bot.send_message(
-                                                msg.chat.id,
-                                                "📋 <b>What I can do:</b>\n\n\
-                                                📝 Create tasks: \"Call mom tomorrow at 5pm\"\n\
-                                                🎤 Voice tasks: send voice message\n\
-                                                ✉️ Drafts: \"Draft message to boss\"\n\n\
-                                                <b>Commands:</b>\n\
-                                                • \"покажи задачи\" / \"show tasks\"\n\
-                                                • \"что на сегодня\" / \"today\"\n\
-                                                • \"настройки\" / \"settings\"",
-                                            )
-                                            .parse_mode(teloxide::types::ParseMode::Html)
-                                            .await?;
+                                            bot.send_message(msg.chat.id, i18n.t(lang, "help-text"))
+                                                .parse_mode(teloxide::types::ParseMode::Html)
+                                                .await?;
                                         }
                                         _ => {
-                                            bot.send_message(msg.chat.id, "🤖 Unknown command")
+                                            bot.send_message(msg.chat.id, i18n.t(lang, "ai-unknown-command"))
                                                 .await?;
                                         }
                                     }
                                 }
                                 Ok(ParsedInput::Rejected { reason }) => {
+                                    let mut args = FluentArgs::new();
+                                    args.set("text", transcript.clone());
+                                    args.set("reason", reason.clone());
+
                                     let _ = bot.edit_message_text(
                                         msg.chat.id,
                                         progress_msg.id,
-                                        format!("🎤 \"{}\"\n\n🤖 {}", transcript, reason),
+                                        i18n.t_args(user.lang(), "voice-transcribed-unknown", &args),
                                     ).await;
                                 }
                                 Err(e) => {
                                     tracing::warn!("AI parse failed: {}, using transcript as task", e);
+                                    let lang = user.lang();
                                     // Check task creation rate limit
                                     if let Err(limit_msg) = RateLimiter::check_and_increment(
                                         &pool, user.id, "task", limits.tasks_per_day, 1440
@@ -1146,12 +1182,17 @@ Share your link and get <b>+7 days</b> for each friend who joins!
 
                                     match Task::create(&pool, user.id, &transcript, None, None, None).await {
                                         Ok(task) => {
+                                            let mut args = FluentArgs::new();
+                                            args.set("text", transcript.clone());
+                                            args.set("title", task.title.clone());
+                                            args.set("due", "".to_string());
+
                                             bot.edit_message_text(
                                                 msg.chat.id,
                                                 progress_msg.id,
-                                                format!("🎤 \"{}\"\n\n✅ Added!\n\n📝 {}", transcript, task.title),
+                                                i18n.t_args(lang, "voice-transcribed-added", &args),
                                             )
-                                            .reply_markup(task_keyboard(task.id, &i18n, user.lang()))
+                                            .reply_markup(task_keyboard(task.id, &i18n, lang))
                                             .await?;
                                         }
                                         Err(e) => {
@@ -1159,7 +1200,7 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                             let _ = bot.edit_message_text(
                                                 msg.chat.id,
                                                 progress_msg.id,
-                                                "❌ Couldn't create task\n\nSomething went wrong.\n\n💡 Try typing your task instead",
+                                                i18n.t(lang, "voice-task-create-failed"),
                                             ).await;
                                         }
                                     }
@@ -1180,7 +1221,7 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                         .await?;
                 }
             } else {
-                bot.send_message(msg.chat.id, "Please /start first!")
+                bot.send_message(msg.chat.id, i18n.t("en", "error-start-first"))
                     .await?;
             }
         }
@@ -1191,10 +1232,13 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                 let timezone = timezone_from_coords(location.latitude, location.longitude);
                 let _ = User::update_timezone(&pool, user.id, &timezone).await;
 
+                let mut args = FluentArgs::new();
+                args.set("timezone", timezone.clone());
+
                 // Remove keyboard
                 bot.send_message(
                     msg.chat.id,
-                    format!("✅ Timezone set to: {}\n\nYour reminders will now use this timezone.", timezone),
+                    i18n.t_args(user.lang(), "timezone-set-success", &args),
                 )
                 .reply_markup(KeyboardRemove::new())
                 .await?;
@@ -1349,6 +1393,7 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                         }
                         PendingEdit::Support => {
                             // Send support message
+                            let lang = user.lang();
                             if let Some(support_chat) = get_support_chat_id() {
                                 let user_info = if let Some(tg_user) = telegram_user {
                                     let username = tg_user.username.as_ref()
@@ -1374,7 +1419,7 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                     Ok(_) => {
                                         bot.send_message(
                                             msg.chat.id,
-                                            "✅ Message sent to support!\n\nWe'll respond within 24 hours.",
+                                            i18n.t(lang, "support-sent-success"),
                                         )
                                         .await?;
                                     }
@@ -1382,7 +1427,7 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                         tracing::error!("Failed to forward support message: {}", e);
                                         bot.send_message(
                                             msg.chat.id,
-                                            "❌ Failed to send message. Please try again later.",
+                                            i18n.t(lang, "support-failed"),
                                         )
                                         .await?;
                                     }
@@ -1390,7 +1435,7 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                             } else {
                                 bot.send_message(
                                     msg.chat.id,
-                                    "❌ Support is temporarily unavailable.",
+                                    i18n.t(lang, "support-unavailable"),
                                 )
                                 .await?;
                             }
@@ -2679,15 +2724,18 @@ pub async fn callback_handler(
     } else if data == "cancel_support" {
         // Cancel support message
         let telegram_id = q.from.id.0 as i64;
-        if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
+        let lang = if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
             let _ = context.take_pending_edit(user.id);
-        }
+            user.lang().to_string()
+        } else {
+            "en".to_string()
+        };
 
         if let Some(msg) = &q.message {
             bot.edit_message_text(
                 msg.chat().id,
                 msg.id(),
-                "❌ Support request cancelled.",
+                i18n.t(&lang, "support-cancelled"),
             )
             .await?;
         }

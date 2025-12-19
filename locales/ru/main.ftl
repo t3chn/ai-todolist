@@ -449,6 +449,95 @@ ai-today-header = 📅 Сегодня ({ $count } { $count ->
 }):
 ai-unknown-command = 🤖 Неизвестная команда
 
+# === Voice Transcription Responses ===
+voice-transcribed = 🎤 "{ $text }"
+voice-transcribed-added = 🎤 "{ $text }"
+
+    ✅ Добавлено!
+
+    📝 { $title }{ $due }
+voice-transcribed-error = 🎤 "{ $text }"
+
+    ❌ Не удалось понять
+
+    💡 Попробуй: "изменить время на 17:00"
+voice-transcribed-reminder-set = 🎤 "{ $text }"
+
+    ⏰ Напоминание установлено!
+
+    📝 { $title }
+    🔔 { $reminder }
+voice-transcribed-reminder-failed = 🎤 "{ $text }"
+
+    ❌ Не удалось понять время
+
+    💡 Попробуй: "завтра в 9" или "через 2 часа"
+voice-transcribed-timezone-set = 🎤 "{ $text }"
+
+    ✅ Часовой пояс: { $timezone }
+voice-transcribed-timezone-failed = 🎤 "{ $text }"
+
+    ❌ Не удалось определить часовой пояс
+
+    💡 Попробуй название крупного города
+voice-transcribed-support-sent = 🎤 "{ $text }"
+
+    ✅ Сообщение отправлено в поддержку!
+voice-transcribed-support-failed = ❌ Не удалось отправить. Попробуй ещё раз.
+voice-transcribed-draft = 🎤 "{ $text }"
+
+    ✉️ Черновик для { $recipient }:
+
+    { $draft }
+
+    💡 Скопируй и отправь!
+voice-transcribed-clarify = 🎤 "{ $text }"
+
+    🤔 { $question }
+
+    Выбери конкретное действие:
+voice-transcribed-unknown = 🎤 "{ $text }"
+
+    🤖 { $reason }
+voice-task-create-failed = ❌ Не удалось создать задачу
+
+    Что-то пошло не так.
+
+    💡 Попробуй написать текстом
+
+# === Support Flow ===
+support-sent-success = ✅ Сообщение отправлено!
+
+    Ответим в течение 24 часов.
+support-failed = ❌ Не удалось отправить. Попробуй позже.
+support-unavailable = ❌ Поддержка временно недоступна.
+
+    Попробуй позже.
+support-cancelled = ❌ Запрос в поддержку отменён.
+
+# === Stale Tasks Inline ===
+stale-warning-inline = ⚠️ { $count } { $count ->
+    [one] задача не обновлялась
+    [few] задачи не обновлялись
+    *[other] задач не обновлялись
+} 7+ дней
+
+# === Timezone ===
+timezone-set-success = ✅ Часовой пояс: { $timezone }
+
+    Напоминания будут приходить по этому времени.
+
+# === Edit Preview ===
+edit-preview-voice = 🎤 "{ $text }"
+
+    📝 <b>Превью:</b>
+
+    <s>{ $old_title }</s>
+    ↓
+    <b>{ $new_title }</b>{ $due_change }
+
+    Применить?
+
 # === Admin ===
 admin-title = 🔧 <b>Панель администратора</b>
 admin-stats = 📊 <b>Статистика</b>
