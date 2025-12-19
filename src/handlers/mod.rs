@@ -729,7 +729,7 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                     }
 
                     // Send initial processing message
-                    let progress_msg = bot.send_message(msg.chat.id, "🎤 Processing voice...")
+                    let progress_msg = bot.send_message(msg.chat.id, i18n.t(user.lang(), "voice-processing"))
                         .await?;
 
                     // Download voice file
@@ -1171,12 +1171,12 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                             let _ = bot.edit_message_text(
                                 msg.chat.id,
                                 progress_msg.id,
-                                "🎤 Couldn't understand voice\n\nThe audio wasn't clear enough.\n\n💡 Try speaking closer to mic or type your task",
+                                i18n.t(user.lang(), "error-voice-failed"),
                             ).await;
                         }
                     }
                 } else {
-                    bot.send_message(msg.chat.id, "❌ Voice messages require AI service")
+                    bot.send_message(msg.chat.id, i18n.t(user.lang(), "error-voice-requires-ai"))
                         .await?;
                 }
             } else {
@@ -1258,7 +1258,7 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                             tracing::warn!("Failed to parse edit: {}", e);
                                             bot.send_message(
                                                 msg.chat.id,
-                                                "❌ Couldn't understand the edit instruction\n\n💡 Try: \"change time to 5pm\" or \"replace John with Mike\"",
+                                                i18n.t(user.lang(), "error-edit-failed"),
                                             )
                                             .await?;
                                         }
@@ -1269,7 +1269,7 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                     bot.send_message(msg.chat.id, format!("✅ Updated: {}", text)).await?;
                                 }
                             } else {
-                                bot.send_message(msg.chat.id, "❌ Task not found").await?;
+                                bot.send_message(msg.chat.id, i18n.t(user.lang(), "error-not-found")).await?;
                             }
                             return Ok(());
                         }
@@ -1277,7 +1277,7 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                             // User sent text instead of clicking button - cancel
                             bot.send_message(
                                 msg.chat.id,
-                                "❌ Edit cancelled. Use the buttons to confirm or cancel.",
+                                i18n.t(user.lang(), "error-use-buttons"),
                             )
                             .await?;
                             return Ok(());
@@ -1305,13 +1305,13 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                         tracing::warn!("Failed to parse reminder time: {}", e);
                                         bot.send_message(
                                             msg.chat.id,
-                                            "❌ Couldn't understand the time\n\n💡 Try: \"завтра в 9\" or \"in 2 hours\"",
+                                            i18n.t(user.lang(), "error-reminder-time-failed"),
                                         )
                                         .await?;
                                     }
                                 }
                             } else {
-                                bot.send_message(msg.chat.id, "❌ AI service required for custom reminders")
+                                bot.send_message(msg.chat.id, i18n.t(user.lang(), "error-ai-required"))
                                     .await?;
                             }
                             return Ok(());
@@ -1336,13 +1336,13 @@ Share your link and get <b>+7 days</b> for each friend who joins!
                                         tracing::warn!("Failed to parse timezone: {}", e);
                                         bot.send_message(
                                             msg.chat.id,
-                                            "❌ Couldn't determine timezone\n\n💡 Try a major city name like \"Moscow\" or \"New York\"",
+                                            i18n.t(user.lang(), "error-timezone-failed"),
                                         )
                                         .await?;
                                     }
                                 }
                             } else {
-                                bot.send_message(msg.chat.id, "❌ AI service required")
+                                bot.send_message(msg.chat.id, i18n.t(user.lang(), "error-ai-required"))
                                     .await?;
                             }
                             return Ok(());
@@ -2573,25 +2573,34 @@ pub async fn callback_handler(
         // Show edit options
         if let Ok(task_id) = task_id_str.parse::<i64>() {
             if let Some(task) = Task::find_by_id(&pool, task_id).await {
+                let telegram_id = q.from.id.0 as i64;
+                let lang = User::find_by_telegram_id(&pool, telegram_id).await
+                    .map(|u| u.lang().to_string())
+                    .unwrap_or_else(|| "en".to_string());
+
                 let edit_keyboard = InlineKeyboardMarkup::new(vec![
                     vec![
-                        InlineKeyboardButton::callback("📝 Edit title", format!("edit_title:{}", task_id)),
-                        InlineKeyboardButton::callback("📅 Edit date", format!("edit_date:{}", task_id)),
+                        InlineKeyboardButton::callback(&i18n.t(&lang, "btn-edit-title"), format!("edit_title:{}", task_id)),
+                        InlineKeyboardButton::callback(&i18n.t(&lang, "btn-edit-date"), format!("edit_date:{}", task_id)),
                     ],
                     vec![
-                        InlineKeyboardButton::callback("↩️ Back", format!("cancel_delete:{}", task_id)),
+                        InlineKeyboardButton::callback(&i18n.t(&lang, "btn-back"), format!("cancel_delete:{}", task_id)),
                     ],
                 ]);
 
                 if let Some(msg) = &q.message {
                     let due_str = task.due_at.as_ref()
                         .map(|d| format!("\n📅 {}", d))
-                        .unwrap_or_else(|| "\n📅 No due date".to_string());
+                        .unwrap_or_default();
+
+                    let mut args = FluentArgs::new();
+                    args.set("title", task.title.clone());
+                    args.set("due", due_str.clone());
 
                     bot.edit_message_text(
                         msg.chat().id,
                         msg.id(),
-                        format!("✏️ Edit task:\n\n📝 {}{}\n\nWhat would you like to change?", task.title, due_str),
+                        i18n.t_args(&lang, "edit-title", &args),
                     )
                     .reply_markup(edit_keyboard)
                     .await?;
@@ -2606,25 +2615,31 @@ pub async fn callback_handler(
             if let Some(task) = Task::find_by_id(&pool, task_id).await {
                 // Get user to set pending edit
                 let telegram_id = q.from.id.0 as i64;
-                if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
+                let lang = if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
                     context.set_pending_edit(user.id, PendingEdit::Title(task_id));
-                }
+                    user.lang().to_string()
+                } else {
+                    "en".to_string()
+                };
 
                 if let Some(msg) = &q.message {
                     let cancel_keyboard = InlineKeyboardMarkup::new(vec![vec![
-                        InlineKeyboardButton::callback("↩️ Cancel", format!("cancel_edit:{}", task_id)),
+                        InlineKeyboardButton::callback(&i18n.t(&lang, "btn-cancel"), format!("cancel_edit:{}", task_id)),
                     ]]);
+
+                    let mut args = FluentArgs::new();
+                    args.set("title", task.title.clone());
 
                     bot.edit_message_text(
                         msg.chat().id,
                         msg.id(),
-                        format!("📝 Current: {}\n\nSend new title:", task.title),
+                        i18n.t_args(&lang, "edit-send-title", &args),
                     )
                     .reply_markup(cancel_keyboard)
                     .await?;
                 }
 
-                bot.answer_callback_query(q.id).text("Send new title").await?;
+                bot.answer_callback_query(q.id).await?;
             }
         }
     } else if let Some(task_id_str) = data.strip_prefix("confirm_edit:") {
@@ -2632,6 +2647,7 @@ pub async fn callback_handler(
         if let Ok(task_id) = task_id_str.parse::<i64>() {
             let telegram_id = q.from.id.0 as i64;
             if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
+                let lang = user.lang();
                 if let Some(PendingEdit::ConfirmEdit(proposed)) = context.take_pending_edit(user.id) {
                     // Apply the changes
                     let _ = Task::update(&pool, task_id, Some(&proposed.new_title), Some(proposed.new_due_at.as_deref())).await;
@@ -2642,17 +2658,21 @@ pub async fn callback_handler(
                                 .map(|d| format!("\n📅 {}", d))
                                 .unwrap_or_default();
 
+                            let mut args = FluentArgs::new();
+                            args.set("title", task.title.clone());
+                            args.set("due", due_str.clone());
+
                             bot.edit_message_text(
                                 msg.chat().id,
                                 msg.id(),
-                                format!("✅ Updated!\n\n📝 {}{}", task.title, due_str),
+                                i18n.t_args(lang, "edit-applied", &args),
                             )
-                            .reply_markup(task_keyboard(task_id, &i18n, user.lang()))
+                            .reply_markup(task_keyboard(task_id, &i18n, lang))
                             .await?;
                         }
                     }
 
-                    bot.answer_callback_query(q.id).text("✅ Changes applied").await?;
+                    bot.answer_callback_query(q.id).text("✅").await?;
                 }
             }
         }
@@ -2707,17 +2727,22 @@ pub async fn callback_handler(
         // Show date options
         if let Ok(task_id) = task_id_str.parse::<i64>() {
             if Task::find_by_id(&pool, task_id).await.is_some() {
+                let telegram_id = q.from.id.0 as i64;
+                let lang = User::find_by_telegram_id(&pool, telegram_id).await
+                    .map(|u| u.lang().to_string())
+                    .unwrap_or_else(|| "en".to_string());
+
                 let date_keyboard = InlineKeyboardMarkup::new(vec![
                     vec![
-                        InlineKeyboardButton::callback("📅 Today", format!("set_date:{}:today", task_id)),
-                        InlineKeyboardButton::callback("📅 Tomorrow", format!("set_date:{}:tomorrow", task_id)),
+                        InlineKeyboardButton::callback(&i18n.t(&lang, "btn-date-today"), format!("set_date:{}:today", task_id)),
+                        InlineKeyboardButton::callback(&i18n.t(&lang, "btn-date-tomorrow"), format!("set_date:{}:tomorrow", task_id)),
                     ],
                     vec![
-                        InlineKeyboardButton::callback("📅 Next week", format!("set_date:{}:next_week", task_id)),
-                        InlineKeyboardButton::callback("🚫 Remove date", format!("set_date:{}:none", task_id)),
+                        InlineKeyboardButton::callback(&i18n.t(&lang, "btn-date-next-week"), format!("set_date:{}:next_week", task_id)),
+                        InlineKeyboardButton::callback(&i18n.t(&lang, "btn-date-remove"), format!("set_date:{}:none", task_id)),
                     ],
                     vec![
-                        InlineKeyboardButton::callback("↩️ Back", format!("edit:{}", task_id)),
+                        InlineKeyboardButton::callback(&i18n.t(&lang, "btn-back"), format!("edit:{}", task_id)),
                     ],
                 ]);
 
@@ -2725,7 +2750,7 @@ pub async fn callback_handler(
                     bot.edit_message_text(
                         msg.chat().id,
                         msg.id(),
-                        "📅 Select new due date:",
+                        i18n.t(&lang, "date-select-title"),
                     )
                     .reply_markup(date_keyboard)
                     .await?;
@@ -2785,31 +2810,40 @@ pub async fn callback_handler(
         // Show reminder options
         if let Ok(task_id) = task_id_str.parse::<i64>() {
             if let Some(task) = Task::find_by_id(&pool, task_id).await {
+                let telegram_id = q.from.id.0 as i64;
+                let lang = User::find_by_telegram_id(&pool, telegram_id).await
+                    .map(|u| u.lang().to_string())
+                    .unwrap_or_else(|| "en".to_string());
+
                 let reminder_str = task.reminder_at.as_ref()
                     .map(|r| format!("🔔 Current: {}", r))
-                    .unwrap_or_else(|| "No reminder set".to_string());
+                    .unwrap_or_else(|| i18n.t(&lang, "no-reminder"));
 
                 let remind_keyboard = InlineKeyboardMarkup::new(vec![
                     vec![
-                        InlineKeyboardButton::callback("⏰ 30 min", format!("set_remind:{}:30", task_id)),
-                        InlineKeyboardButton::callback("⏰ 1 hour", format!("set_remind:{}:60", task_id)),
-                        InlineKeyboardButton::callback("⏰ 3 hours", format!("set_remind:{}:180", task_id)),
+                        InlineKeyboardButton::callback(&i18n.t(&lang, "btn-remind-30min"), format!("set_remind:{}:30", task_id)),
+                        InlineKeyboardButton::callback(&i18n.t(&lang, "btn-remind-1h"), format!("set_remind:{}:60", task_id)),
+                        InlineKeyboardButton::callback(&i18n.t(&lang, "btn-remind-3h"), format!("set_remind:{}:180", task_id)),
                     ],
                     vec![
-                        InlineKeyboardButton::callback("⏰ Tomorrow 9am", format!("set_remind:{}:tomorrow", task_id)),
-                        InlineKeyboardButton::callback("✍️ Custom", format!("set_remind:{}:custom", task_id)),
+                        InlineKeyboardButton::callback(&i18n.t(&lang, "btn-remind-tomorrow"), format!("set_remind:{}:tomorrow", task_id)),
+                        InlineKeyboardButton::callback(&i18n.t(&lang, "btn-remind-custom"), format!("set_remind:{}:custom", task_id)),
                     ],
                     vec![
-                        InlineKeyboardButton::callback("🚫 Remove", format!("set_remind:{}:none", task_id)),
-                        InlineKeyboardButton::callback("↩️ Back", format!("cancel_delete:{}", task_id)),
+                        InlineKeyboardButton::callback(&i18n.t(&lang, "btn-remind-remove"), format!("set_remind:{}:none", task_id)),
+                        InlineKeyboardButton::callback(&i18n.t(&lang, "btn-back"), format!("cancel_delete:{}", task_id)),
                     ],
                 ]);
 
                 if let Some(msg) = &q.message {
+                    let mut args = FluentArgs::new();
+                    args.set("title", task.title.clone());
+                    args.set("current", reminder_str.clone());
+
                     bot.edit_message_text(
                         msg.chat().id,
                         msg.id(),
-                        format!("⏰ Set reminder for:\n\n📝 {}\n\n{}\n\n✍️ Custom: send text or 🎤 voice", task.title, reminder_str),
+                        i18n.t_args(&lang, "remind-select-title", &args),
                     )
                     .reply_markup(remind_keyboard)
                     .await?;
@@ -2828,27 +2862,33 @@ pub async fn callback_handler(
                 // Handle custom reminder - set pending edit and ask for input
                 if option == "custom" {
                     let telegram_id = q.from.id.0 as i64;
-                    if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
+                    let lang = if let Some(user) = User::find_by_telegram_id(&pool, telegram_id).await {
                         context.set_pending_edit(user.id, PendingEdit::Reminder(task_id));
-                    }
+                        user.lang().to_string()
+                    } else {
+                        "en".to_string()
+                    };
 
                     if let Some(task) = Task::find_by_id(&pool, task_id).await {
                         if let Some(msg) = &q.message {
                             let cancel_keyboard = InlineKeyboardMarkup::new(vec![vec![
-                                InlineKeyboardButton::callback("↩️ Cancel", format!("cancel_edit:{}", task_id)),
+                                InlineKeyboardButton::callback(&i18n.t(&lang, "btn-cancel"), format!("cancel_edit:{}", task_id)),
                             ]]);
+
+                            let mut args = FluentArgs::new();
+                            args.set("title", task.title.clone());
 
                             bot.edit_message_text(
                                 msg.chat().id,
                                 msg.id(),
-                                format!("⏰ When to remind about:\n📝 {}\n\nSend time (text or 🎤 voice):\n• \"завтра в 15:00\"\n• \"через 2 часа\"\n• \"monday morning\"", task.title),
+                                i18n.t_args(&lang, "remind-custom-prompt", &args),
                             )
                             .reply_markup(cancel_keyboard)
                             .await?;
                         }
                     }
 
-                    bot.answer_callback_query(q.id).text("Send reminder time").await?;
+                    bot.answer_callback_query(q.id).await?;
                     return Ok(());
                 }
 
@@ -2888,9 +2928,11 @@ pub async fn callback_handler(
                             .unwrap_or_default();
 
                         let reminder_msg = if option == "none" {
-                            "🔕 Reminder removed".to_string()
+                            i18n.t(&lang, "remind-removed")
                         } else {
-                            format!("⏰ Reminder set {}", confirm_text)
+                            let mut args = FluentArgs::new();
+                            args.set("when", confirm_text.to_string());
+                            i18n.t_args(&lang, "remind-set", &args)
                         };
 
                         bot.edit_message_text(
@@ -2903,7 +2945,7 @@ pub async fn callback_handler(
                     }
                 }
 
-                bot.answer_callback_query(q.id).text(format!("⏰ Reminder {}", confirm_text)).await?;
+                bot.answer_callback_query(q.id).text("⏰").await?;
             }
         }
     } else if data == "subscribe" {

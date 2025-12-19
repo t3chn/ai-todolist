@@ -333,6 +333,9 @@ error-edit-failed = ❌ Couldn't understand the edit instruction
 error-timezone-failed = ❌ Couldn't determine timezone
 
     💡 Try a major city name like "Moscow" or "New York"
+error-reminder-time-failed = ❌ Couldn't understand the time
+
+    💡 Try: "tomorrow at 9" or "in 2 hours"
 
 # === Voice ===
 voice-processing = 🎤 Processing voice...
