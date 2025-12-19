@@ -320,6 +320,81 @@ error-task-create = ❌ Couldn't create task
     Something went wrong on our end.
 
     💡 Try: "Buy milk tomorrow at 5pm"
+error-voice-failed = 🎤 Couldn't understand voice
+
+    The audio wasn't clear enough.
+
+    💡 Try speaking closer to mic or type your task
+error-voice-requires-ai = ❌ Voice messages require AI service
+error-ai-required = ❌ AI service required
+error-edit-failed = ❌ Couldn't understand the edit instruction
+
+    💡 Try: "change time to 5pm" or "replace John with Mike"
+error-timezone-failed = ❌ Couldn't determine timezone
+
+    💡 Try a major city name like "Moscow" or "New York"
+
+# === Voice ===
+voice-processing = 🎤 Processing voice...
+
+# === Edit ===
+edit-title = ✏️ Edit task:
+
+    📝 { $title }{ $due }
+
+    What would you like to change?
+edit-send-title = 📝 Current: { $title }
+
+    Send new title:
+edit-preview = ✏️ Preview changes:
+
+    📝 { $old_title } → { $new_title }{ $due_change }
+
+    Apply these changes?
+edit-cancelled = ❌ Edit cancelled
+edit-applied = ✅ Updated!
+
+    📝 { $title }{ $due }
+btn-apply = ✅ Apply
+btn-edit-title = 📝 Edit title
+btn-edit-date = 📅 Edit date
+
+# === Date Selection ===
+date-select-title = 📅 Select new due date:
+btn-date-today = 📅 Today
+btn-date-tomorrow = 📅 Tomorrow
+btn-date-next-week = 📅 Next week
+btn-date-remove = 🚫 Remove date
+date-updated = ✅ Date updated
+
+# === Reminder Selection ===
+remind-select-title = ⏰ Set reminder for:
+
+    📝 { $title }
+
+    { $current }
+
+    ✍️ Custom: send text or 🎤 voice
+remind-custom-prompt = ⏰ When to remind about:
+    📝 { $title }
+
+    Send time (text or 🎤 voice):
+    • "tomorrow at 3pm"
+    • "in 2 hours"
+    • "monday morning"
+btn-remind-30min = ⏰ 30 min
+btn-remind-1h = ⏰ 1 hour
+btn-remind-3h = ⏰ 3 hours
+btn-remind-tomorrow = ⏰ Tomorrow 9am
+btn-remind-custom = ✍️ Custom
+btn-remind-remove = 🚫 Remove
+remind-removed = 🔕 Reminder removed
+remind-set = ⏰ Reminder set { $when }
+no-reminder = No reminder set
+
+# === Stale Tasks ===
+btn-stale-review = 📋 Review
+btn-stale-keep-all = ✓ Keep all
 
 # === Subscription Expired ===
 subscription-expired-full = ⏰ Your trial has ended!

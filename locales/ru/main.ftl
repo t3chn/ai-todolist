@@ -331,6 +331,81 @@ error-task-create = ❌ Не удалось создать задачу
     Что-то пошло не так.
 
     💡 Попробуй: "Купить молоко завтра в 17:00"
+error-voice-failed = 🎤 Не удалось распознать голос
+
+    Аудио недостаточно чёткое.
+
+    💡 Попробуй говорить ближе к микрофону или напиши текстом
+error-voice-requires-ai = ❌ Для голосовых сообщений нужен AI-сервис
+error-ai-required = ❌ Требуется AI-сервис
+error-edit-failed = ❌ Не удалось понять инструкцию
+
+    💡 Попробуй: "изменить время на 17:00" или "заменить Ивана на Петра"
+error-timezone-failed = ❌ Не удалось определить часовой пояс
+
+    💡 Попробуй крупный город: "Москва" или "Киев"
+
+# === Voice ===
+voice-processing = 🎤 Обрабатываю голос...
+
+# === Edit ===
+edit-title = ✏️ Редактирование:
+
+    📝 { $title }{ $due }
+
+    Что изменить?
+edit-send-title = 📝 Сейчас: { $title }
+
+    Отправь новый заголовок:
+edit-preview = ✏️ Предпросмотр:
+
+    📝 { $old_title } → { $new_title }{ $due_change }
+
+    Применить изменения?
+edit-cancelled = ❌ Редактирование отменено
+edit-applied = ✅ Обновлено!
+
+    📝 { $title }{ $due }
+btn-apply = ✅ Применить
+btn-edit-title = 📝 Заголовок
+btn-edit-date = 📅 Дата
+
+# === Date Selection ===
+date-select-title = 📅 Выбери новую дату:
+btn-date-today = 📅 Сегодня
+btn-date-tomorrow = 📅 Завтра
+btn-date-next-week = 📅 Через неделю
+btn-date-remove = 🚫 Убрать дату
+date-updated = ✅ Дата обновлена
+
+# === Reminder Selection ===
+remind-select-title = ⏰ Напоминание для:
+
+    📝 { $title }
+
+    { $current }
+
+    ✍️ Своё время: текст или 🎤 голос
+remind-custom-prompt = ⏰ Когда напомнить о:
+    📝 { $title }
+
+    Отправь время (текст или 🎤 голос):
+    • "завтра в 15:00"
+    • "через 2 часа"
+    • "в понедельник утром"
+btn-remind-30min = ⏰ 30 мин
+btn-remind-1h = ⏰ 1 час
+btn-remind-3h = ⏰ 3 часа
+btn-remind-tomorrow = ⏰ Завтра 9:00
+btn-remind-custom = ✍️ Своё
+btn-remind-remove = 🚫 Убрать
+remind-removed = 🔕 Напоминание убрано
+remind-set = ⏰ Напоминание: { $when }
+no-reminder = Напоминание не установлено
+
+# === Stale Tasks ===
+btn-stale-review = 📋 Обзор
+btn-stale-keep-all = ✓ Оставить все
 
 # === Subscription Expired ===
 subscription-expired-full = ⏰ Пробный период закончился!
