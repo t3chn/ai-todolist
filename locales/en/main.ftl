@@ -555,8 +555,115 @@ date-updated-confirm = ✅ Updated!
 
     📝 { $title }{ $due }
 
-# === Admin ===
-admin-title = 🔧 <b>Admin Panel</b>
-admin-stats = 📊 <b>Statistics</b>
-admin-users = 👥 <b>Users</b>
-admin-broadcast = 📢 <b>Broadcast</b>
+# === Admin Panel ===
+admin-title = 🔐 <b>Admin Panel</b>
+
+    Select an option:
+admin-access-denied = ⛔ Access denied
+
+# Admin Buttons
+btn-admin-stats = 📊 Stats
+btn-admin-users = 👥 Users
+btn-admin-broadcast = 📢 Broadcast
+btn-admin-banned = 🚫 Banned
+btn-admin-search = 🔍 Search
+btn-admin-recent = 📋 Recent
+btn-admin-back = ↩️ Back
+btn-admin-cancel = ↩️ Cancel
+btn-admin-all-users = 📢 All users
+btn-admin-trial = 🎁 Trial
+btn-admin-paid = ✅ Paid
+btn-admin-expired = ❌ Expired
+btn-admin-grant-30 = 📅 +30 days
+btn-admin-grant-90 = 📅 +90 days
+btn-admin-grant-365 = 📅 +365 days
+btn-admin-unban = ✅ Unban
+btn-admin-ban = 🚫 Ban
+btn-admin-message = 💬 Message
+
+# Admin Stats
+admin-stats-title = 📊 <b>Statistics</b>
+
+    👥 <b>Users</b>
+    ├─ Total: <b>{ $total }</b>
+    ├─ 🎁 Trial: <b>{ $trial }</b>
+    ├─ ✅ Paid: <b>{ $paid }</b>
+    ├─ ❌ Expired: <b>{ $expired }</b>
+    └─ 🚫 Banned: <b>{ $banned }</b>
+
+    📈 <b>Activity</b>
+    ├─ Active 7d: <b>{ $active7d }</b>
+    └─ Active 30d: <b>{ $active30d }</b>
+
+    🆕 <b>Growth</b>
+    ├─ Today: <b>+{ $today }</b>
+    └─ This week: <b>+{ $week }</b>
+
+# Admin User Management
+admin-users-title = 👥 <b>User Management</b>
+
+    Search by @username, name or ID:
+admin-search-title = 🔍 <b>Search User</b>
+
+    Send @username, name or telegram ID:
+admin-search-prompt = Enter search query
+admin-search-results = 🔍 Found { $count } user(s):
+admin-recent-title = 📋 <b>Recent Users</b>
+
+# Admin Broadcast
+admin-broadcast-title = 📢 <b>Broadcast</b>
+
+    Select target audience:
+admin-broadcast-to = 📢 <b>Broadcast to { $segment }</b>
+
+    Send your message:
+admin-broadcast-prompt = Send broadcast message
+admin-broadcast-sending = 📢 Sending to { $count } users...
+admin-broadcast-complete = ✅ Broadcast complete!
+
+    📨 Sent: { $sent }
+    ❌ Failed: { $failed }
+admin-segment-all = all users
+admin-segment-trial = trial users
+admin-segment-paid = paid users
+admin-segment-expired = expired users
+
+# Admin Banned Users
+admin-banned-title = 🚫 <b>Banned Users</b>
+admin-banned-empty = 🚫 <b>Banned Users</b>
+
+    No banned users.
+admin-ban-no-reason = No reason
+
+# Admin User Card
+admin-user-card = 👤 <b>{ $name }</b>
+    ID: <code>{ $id }</code> | TG: <code>{ $tg_id }</code>
+
+    📊 Status: { $status }
+    📅 Joined: { $joined }
+    📝 Tasks: { $tasks }
+    🔗 Referrals: { $referrals }
+
+# Admin Actions
+admin-grant-success = ✅ Granted { $days } days
+admin-grant-confirm = ✅ Subscription granted!
+
+    👤 { $name } — { $status }
+admin-grant-failed = ❌ Failed
+admin-ban-reason = Banned by admin
+admin-ban-callback = 🚫 User banned
+admin-ban-confirm = 🚫 User has been banned.
+admin-unban-callback = ✅ User unbanned
+admin-unban-confirm = ✅ User has been unbanned.
+
+# Admin Message
+admin-message-title = 💬 <b>Send Message</b>
+
+    Type your message to send to this user:
+admin-message-prompt = Type message
+admin-message-sent = ✅ Message sent to { $name }
+admin-message-failed = ❌ Failed to send: { $error }
+admin-message-from = 📨 <b>Message from Admin:</b>
+
+    { $text }
+admin-text-required = ⚠️ Please send text message for admin actions.

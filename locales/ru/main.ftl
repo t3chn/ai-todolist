@@ -568,8 +568,115 @@ date-updated-confirm = ✅ Обновлено!
 
     📝 { $title }{ $due }
 
-# === Admin ===
-admin-title = 🔧 <b>Панель администратора</b>
-admin-stats = 📊 <b>Статистика</b>
-admin-users = 👥 <b>Пользователи</b>
-admin-broadcast = 📢 <b>Рассылка</b>
+# === Admin Panel ===
+admin-title = 🔐 <b>Панель администратора</b>
+
+    Выберите действие:
+admin-access-denied = ⛔ Доступ запрещён
+
+# Admin Buttons
+btn-admin-stats = 📊 Статистика
+btn-admin-users = 👥 Пользователи
+btn-admin-broadcast = 📢 Рассылка
+btn-admin-banned = 🚫 Заблокированные
+btn-admin-search = 🔍 Поиск
+btn-admin-recent = 📋 Последние
+btn-admin-back = ↩️ Назад
+btn-admin-cancel = ↩️ Отмена
+btn-admin-all-users = 📢 Все
+btn-admin-trial = 🎁 Пробные
+btn-admin-paid = ✅ Платные
+btn-admin-expired = ❌ Истёкшие
+btn-admin-grant-30 = 📅 +30 дней
+btn-admin-grant-90 = 📅 +90 дней
+btn-admin-grant-365 = 📅 +365 дней
+btn-admin-unban = ✅ Разблокировать
+btn-admin-ban = 🚫 Заблокировать
+btn-admin-message = 💬 Написать
+
+# Admin Stats
+admin-stats-title = 📊 <b>Статистика</b>
+
+    👥 <b>Пользователи</b>
+    ├─ Всего: <b>{ $total }</b>
+    ├─ 🎁 Пробные: <b>{ $trial }</b>
+    ├─ ✅ Платные: <b>{ $paid }</b>
+    ├─ ❌ Истёкшие: <b>{ $expired }</b>
+    └─ 🚫 Заблокированные: <b>{ $banned }</b>
+
+    📈 <b>Активность</b>
+    ├─ За 7 дней: <b>{ $active7d }</b>
+    └─ За 30 дней: <b>{ $active30d }</b>
+
+    🆕 <b>Рост</b>
+    ├─ Сегодня: <b>+{ $today }</b>
+    └─ За неделю: <b>+{ $week }</b>
+
+# Admin User Management
+admin-users-title = 👥 <b>Управление пользователями</b>
+
+    Поиск по @username, имени или ID:
+admin-search-title = 🔍 <b>Поиск пользователя</b>
+
+    Введите @username, имя или telegram ID:
+admin-search-prompt = Введите запрос
+admin-search-results = 🔍 Найдено { $count } пользователей:
+admin-recent-title = 📋 <b>Последние пользователи</b>
+
+# Admin Broadcast
+admin-broadcast-title = 📢 <b>Рассылка</b>
+
+    Выберите аудиторию:
+admin-broadcast-to = 📢 <b>Рассылка для { $segment }</b>
+
+    Введите сообщение:
+admin-broadcast-prompt = Введите сообщение
+admin-broadcast-sending = 📢 Отправка { $count } пользователям...
+admin-broadcast-complete = ✅ Рассылка завершена!
+
+    📨 Отправлено: { $sent }
+    ❌ Ошибок: { $failed }
+admin-segment-all = всех
+admin-segment-trial = пробных
+admin-segment-paid = платных
+admin-segment-expired = истёкших
+
+# Admin Banned Users
+admin-banned-title = 🚫 <b>Заблокированные</b>
+admin-banned-empty = 🚫 <b>Заблокированные</b>
+
+    Нет заблокированных пользователей.
+admin-ban-no-reason = Без причины
+
+# Admin User Card
+admin-user-card = 👤 <b>{ $name }</b>
+    ID: <code>{ $id }</code> | TG: <code>{ $tg_id }</code>
+
+    📊 Статус: { $status }
+    📅 Регистрация: { $joined }
+    📝 Задач: { $tasks }
+    🔗 Рефералов: { $referrals }
+
+# Admin Actions
+admin-grant-success = ✅ Добавлено { $days } дней
+admin-grant-confirm = ✅ Подписка активирована!
+
+    👤 { $name } — { $status }
+admin-grant-failed = ❌ Ошибка
+admin-ban-reason = Заблокирован администратором
+admin-ban-callback = 🚫 Пользователь заблокирован
+admin-ban-confirm = 🚫 Пользователь заблокирован.
+admin-unban-callback = ✅ Пользователь разблокирован
+admin-unban-confirm = ✅ Пользователь разблокирован.
+
+# Admin Message
+admin-message-title = 💬 <b>Отправить сообщение</b>
+
+    Введите сообщение для этого пользователя:
+admin-message-prompt = Введите сообщение
+admin-message-sent = ✅ Сообщение отправлено: { $name }
+admin-message-failed = ❌ Ошибка отправки: { $error }
+admin-message-from = 📨 <b>Сообщение от Администратора:</b>
+
+    { $text }
+admin-text-required = ⚠️ Для админ-действий используйте текстовые сообщения.
