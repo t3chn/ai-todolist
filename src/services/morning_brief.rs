@@ -22,9 +22,20 @@ pub async fn start_morning_brief_loop(bot: Bot, pool: Arc<SqlitePool>, i18n: Arc
 }
 
 async fn check_and_send_briefs(bot: &Bot, pool: &SqlitePool, i18n: &I18n) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // Only send briefs to admin users (briefs disabled for regular users)
+    let admin_ids: Vec<i64> = std::env::var("ADMIN_IDS")
+        .unwrap_or_default()
+        .split(',')
+        .filter_map(|s| s.trim().parse().ok())
+        .collect();
+
     let users = User::find_users_for_morning_brief(pool).await?;
 
     for user in users {
+        // Skip non-admin users
+        if !admin_ids.contains(&user.telegram_id) {
+            continue;
+        }
         let lang = user.lang();
         let brief = generate_brief(pool, &user, i18n, lang).await?;
 
