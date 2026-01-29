@@ -13,3 +13,11 @@ repos:
       - id: detect-private-key
       - id: check-added-large-files
         args: ['--maxkb=1000']
+
+  - repo: local
+    hooks:
+      - id: detect-pii
+        name: detect-pii
+        entry: scripts/check_pii.sh
+        language: system
+        types: [text]
