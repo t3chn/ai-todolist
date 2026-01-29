@@ -2156,7 +2156,9 @@ pub async fn callback_handler(
     } else if data == "dup:cancel" {
         // User cancelled duplicate task creation
         let telegram_id = q.from.id.0 as i64;
-        let lang = User::find_by_telegram_id(&pool, telegram_id).await
+        let admin_user = User::find_by_telegram_id(&pool, telegram_id).await;
+        let lang = admin_user
+            .as_ref()
             .map(|u| u.lang().to_string())
             .unwrap_or_else(|| "en".to_string());
 
@@ -2326,7 +2328,9 @@ pub async fn callback_handler(
     } else if data == "settings:timezone" {
         // Show timezone options with auto-detect
         let telegram_id = q.from.id.0 as i64;
-        let lang = User::find_by_telegram_id(&pool, telegram_id).await
+        let admin_user = User::find_by_telegram_id(&pool, telegram_id).await;
+        let lang = admin_user
+            .as_ref()
             .map(|u| u.lang().to_string())
             .unwrap_or_else(|| "en".to_string());
 
@@ -2367,7 +2371,9 @@ pub async fn callback_handler(
     } else if data == "tz:auto" {
         // Request location for auto-detect
         let telegram_id = q.from.id.0 as i64;
-        let lang = User::find_by_telegram_id(&pool, telegram_id).await
+        let admin_user = User::find_by_telegram_id(&pool, telegram_id).await;
+        let lang = admin_user
+            .as_ref()
             .map(|u| u.lang().to_string())
             .unwrap_or_else(|| "en".to_string());
 
@@ -3116,7 +3122,9 @@ pub async fn callback_handler(
             return Ok(());
         }
 
-        let lang = User::find_by_telegram_id(&pool, telegram_id).await
+        let admin_user = User::find_by_telegram_id(&pool, telegram_id).await;
+        let lang = admin_user
+            .as_ref()
             .map(|u| u.lang().to_string())
             .unwrap_or_else(|| "en".to_string());
 
@@ -3172,7 +3180,9 @@ pub async fn callback_handler(
             }
             "search" => {
                 // Set pending admin search
-                context.set_pending_edit(telegram_id, PendingEdit::AdminSearch);
+                if let Some(user) = &admin_user {
+                    context.set_pending_edit(user.id, PendingEdit::AdminSearch);
+                }
 
                 let cancel_keyboard = InlineKeyboardMarkup::new(vec![
                     vec![InlineKeyboardButton::callback(&i18n.t(&lang, "btn-admin-cancel"), "admin:users")],
@@ -3314,12 +3324,16 @@ pub async fn callback_handler(
             return Ok(());
         }
 
-        let lang = User::find_by_telegram_id(&pool, telegram_id).await
+        let admin_user = User::find_by_telegram_id(&pool, telegram_id).await;
+        let lang = admin_user
+            .as_ref()
             .map(|u| u.lang().to_string())
             .unwrap_or_else(|| "en".to_string());
 
         // Set pending broadcast with segment
-        context.set_pending_edit(telegram_id, PendingEdit::AdminBroadcast(bc_segment.to_string()));
+        if let Some(user) = &admin_user {
+            context.set_pending_edit(user.id, PendingEdit::AdminBroadcast(bc_segment.to_string()));
+        }
 
         let segment_key = match bc_segment {
             "all" => "admin-segment-all",
@@ -3524,12 +3538,16 @@ pub async fn callback_handler(
             return Ok(());
         }
 
-        let lang = User::find_by_telegram_id(&pool, telegram_id).await
+        let admin_user = User::find_by_telegram_id(&pool, telegram_id).await;
+        let lang = admin_user
+            .as_ref()
             .map(|u| u.lang().to_string())
             .unwrap_or_else(|| "en".to_string());
 
         if let Ok(user_id) = user_id_str.parse::<i64>() {
-            context.set_pending_edit(telegram_id, PendingEdit::AdminMessage(user_id));
+            if let Some(user) = &admin_user {
+                context.set_pending_edit(user.id, PendingEdit::AdminMessage(user_id));
+            }
 
             let cancel_keyboard = InlineKeyboardMarkup::new(vec![
                 vec![InlineKeyboardButton::callback(&i18n.t(&lang, "btn-admin-cancel"), format!("admin:user:{}", user_id))],
