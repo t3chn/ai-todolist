@@ -10,6 +10,7 @@ The current product direction is:
 
 - `PRODUCT_STRATEGY.md` — positioning, product boundaries, target value.
 - `ROADMAP.md` — product roadmap by phase.
+- `PRODUCT_BACKLOG.md` — prioritized product backlog derived from the roadmap.
 - `PRICING_MODEL.md` — Free, Community Bonus, and Pro value ladder.
 - `UX_DIRECTION.md` — bot-first UX and future Telegram Mini App split.
 - `METRICS_AND_EXPERIMENTS.md` — activation, retention, conversion, and experiments.
